@@ -293,12 +293,16 @@ async def get_challenge_context(
     # NEEDS SQLALCHEMY GLUE
     raise HTTPException(status_code=404, detail="Challenge context not found")
 
-
 #### END STUBBED CODE
 
+
+@app.get("/health_check")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "ok"}
 
 
 # Run with: uvicorn main:app --reload
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=8080)
