@@ -1,3 +1,5 @@
+[![CodeFactor](https://www.codefactor.io/repository/github/trustbuilder-ai/wargames-ai-backend/badge)](https://www.codefactor.io/repository/github/trustbuilder-ai/wargames-ai-backend)
+
 # Wargames AI Backend
 
 ## Setup
