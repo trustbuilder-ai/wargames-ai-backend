@@ -1,9 +1,8 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKeyConstraint, Index, Integer, PrimaryKeyConstraint, Text, UUID, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, Column, DateTime, ForeignKeyConstraint, Index, Integer, PrimaryKeyConstraint, Text, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
-
 
 class Tournaments(SQLModel, table=True):
     __table_args__ = (
@@ -29,7 +28,7 @@ class Users(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, primary_key=True))
-    sub_id: str = Field(sa_column=Column('sub_id', Uuid))
+    sub_id: str = Field(sa_column=Column('sub_id', Text))
 
     user_tournament_enrollments: List['UserTournamentEnrollments'] = Relationship(back_populates='user')
     user_challenge_contexts: List['UserChallengeContexts'] = Relationship(back_populates='user')
@@ -47,6 +46,8 @@ class Challenges(SQLModel, table=True):
     name: str = Field(sa_column=Column('name', Text))
     tournament_id: int = Field(sa_column=Column('tournament_id', Integer))
     description: Optional[str] = Field(default=None, sa_column=Column('description', Text))
+    tools_available: Optional[str] = Field(default=None, sa_column=Column('tools_available', Text))
+    tool_calls_success_criteria: Optional[str] = Field(default=None, sa_column=Column('tool_calls_success_criteria', Text))
 
     tournament: Optional['Tournaments'] = Relationship(back_populates='challenges')
     badges: List['Badges'] = Relationship(back_populates='challenge')

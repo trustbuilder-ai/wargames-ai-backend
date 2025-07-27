@@ -48,18 +48,14 @@
         "summary": "List Tournaments",
         "description": "List tournaments with filtering",
         "operationId": "list_tournaments_tournaments_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
         "parameters": [
           {
             "name": "selection_filter",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
-              "$ref": "#/components/schemas/SelectionFilter"
+              "$ref": "#/components/schemas/SelectionFilter",
+              "default": "ACTIVE"
             }
           },
           {
@@ -91,7 +87,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/TournamentResponse"
+                    "$ref": "#/components/schemas/Tournaments"
                   },
                   "title": "Response List Tournaments Tournaments Get"
                 }
@@ -138,7 +134,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TournamentResponse"
+                  "$ref": "#/components/schemas/Tournaments"
                 }
               }
             }
@@ -206,7 +202,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/BadgeResponse"
+                    "$ref": "#/components/schemas/Badges"
                   },
                   "title": "Response List Badges Badges Get"
                 }
@@ -253,7 +249,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BadgeResponse"
+                  "$ref": "#/components/schemas/Badges"
                 }
               }
             }
@@ -282,14 +278,6 @@
           }
         ],
         "parameters": [
-          {
-            "name": "selection_filter",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SelectionFilter"
-            }
-          },
           {
             "name": "tournament_id",
             "in": "query",
@@ -335,7 +323,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ChallengeResponse"
+                    "$ref": "#/components/schemas/Challenges"
                   },
                   "title": "Response List Challenges Challenges Get"
                 }
@@ -355,11 +343,11 @@
         }
       }
     },
-    "/users/me/badges": {
-      "get": {
-        "summary": "List User Badges",
-        "description": "List current user's badges",
-        "operationId": "list_user_badges_users_me_badges_get",
+    "/challenges/{challenge_id}/start": {
+      "post": {
+        "summary": "Start Challenge",
+        "description": "Start a challenge for the current user",
+        "operationId": "start_challenge_challenges__challenge_id__start_post",
         "security": [
           {
             "HTTPBearer": []
@@ -367,23 +355,64 @@
         ],
         "parameters": [
           {
-            "name": "page_index",
-            "in": "query",
-            "required": false,
+            "name": "challenge_id",
+            "in": "path",
+            "required": true,
             "schema": {
               "type": "integer",
-              "default": 0,
-              "title": "Page Index"
+              "title": "Challenge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/challenges/{challenge_id}/submit_message": {
+      "post": {
+        "summary": "Submit Message To Challenge",
+        "description": "Submit a message to the challenge agent",
+        "operationId": "submit_message_to_challenge_challenges__challenge_id__submit_message_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "challenge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Challenge Id"
             }
           },
           {
-            "name": "count",
+            "name": "message",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
-              "type": "integer",
-              "default": 10,
-              "title": "Count"
+              "type": "string",
+              "title": "Message"
             }
           }
         ],
@@ -393,11 +422,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/UserBadgeResponse"
-                  },
-                  "title": "Response List User Badges Users Me Badges Get"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/UserChallengeContexts"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Submit Message To Challenge Challenges  Challenge Id  Submit Message Post"
                 }
               }
             }
@@ -458,6 +491,30 @@
         }
       }
     },
+    "/users/me": {
+      "get": {
+        "summary": "Get Current User Info",
+        "description": "Get current user information",
+        "operationId": "get_current_user_info_users_me_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/challenges/{challenge_id}/context": {
       "get": {
         "summary": "Get Challenge Context",
@@ -502,14 +559,38 @@
           }
         }
       }
+    },
+    "/health_check": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Health check endpoint",
+        "operationId": "health_check_health_check_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
-      "BadgeResponse": {
+      "Badges": {
         "properties": {
           "id": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Id"
           },
           "challenge_id": {
@@ -519,10 +600,9 @@
         },
         "type": "object",
         "required": [
-          "id",
           "challenge_id"
         ],
-        "title": "BadgeResponse"
+        "title": "Badges"
       },
       "ChallengeContextResponse": {
         "properties": {
@@ -581,10 +661,17 @@
         ],
         "title": "ChallengeContextResponse"
       },
-      "ChallengeResponse": {
+      "Challenges": {
         "properties": {
           "id": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Id"
           },
           "name": {
@@ -605,15 +692,36 @@
               }
             ],
             "title": "Description"
+          },
+          "tools_available": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools Available"
+          },
+          "tool_calls_success_criteria": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls Success Criteria"
           }
         },
         "type": "object",
         "required": [
-          "id",
           "name",
           "tournament_id"
         ],
-        "title": "ChallengeResponse"
+        "title": "Challenges"
       },
       "CreateUserRequest": {
         "properties": {
@@ -663,10 +771,17 @@
         ],
         "title": "SelectionFilter"
       },
-      "TournamentResponse": {
+      "Tournaments": {
         "properties": {
           "id": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Id"
           },
           "name": {
@@ -697,41 +812,123 @@
         },
         "type": "object",
         "required": [
-          "id",
           "name",
           "start_date",
           "end_date"
         ],
-        "title": "TournamentResponse"
+        "title": "Tournaments"
       },
-      "UserBadgeResponse": {
+      "UserChallengeContexts": {
         "properties": {
           "id": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Id"
+          },
+          "can_contribute": {
+            "type": "boolean",
+            "title": "Can Contribute"
+          },
+          "challenge_id": {
+            "type": "integer",
+            "title": "Challenge Id"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
           },
           "user_id": {
             "type": "integer",
             "title": "User Id"
           },
-          "badge_id": {
-            "type": "integer",
-            "title": "Badge Id"
+          "letta_agent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Letta Agent Id"
           },
-          "awarded_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Awarded At"
+          "succeeded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Succeeded At"
           }
         },
         "type": "object",
         "required": [
-          "id",
-          "user_id",
-          "badge_id",
-          "awarded_at"
+          "can_contribute",
+          "challenge_id",
+          "started_at",
+          "user_id"
         ],
-        "title": "UserBadgeResponse"
+        "title": "UserChallengeContexts"
+      },
+      "UserInfo": {
+        "properties": {
+          "user_id": {
+            "type": "integer",
+            "title": "User Id"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "active_tournaments": {
+            "items": {
+              "$ref": "#/components/schemas/Tournaments"
+            },
+            "type": "array",
+            "title": "Active Tournaments"
+          },
+          "active_challenges": {
+            "items": {
+              "$ref": "#/components/schemas/Challenges"
+            },
+            "type": "array",
+            "title": "Active Challenges"
+          },
+          "badges": {
+            "items": {
+              "$ref": "#/components/schemas/Badges"
+            },
+            "type": "array",
+            "title": "Badges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id",
+          "active_tournaments",
+          "active_challenges",
+          "badges"
+        ],
+        "title": "UserInfo",
+        "description": "Represents a user's information including active tournaments, challenges, and badges."
       },
       "ValidationError": {
         "properties": {

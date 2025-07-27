@@ -8,9 +8,20 @@ from jwt import PyJWKClient
 import os
 from typing import Optional, Dict, Any, List
 import httpx
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from enum import StrEnum
+
+from sqlmodel import select, or_, and_
+from sqlmodel import Session
+
+from backend.db_api import get_user_info
+from backend.database.models import (
+    Tournaments, Users, Challenges, UserTournamentEnrollments,
+    Badges, UserChallengeContexts, UserBadges
+)
+from backend.database.connection import get_db
+from backend.models.supplemental import UserInfo
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,10 +39,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from backend.models.models import (
-    Tournaments, Users, Challenges, UserTournamentEnrollments,
-    Badges, UserChallengeContexts, UserBadges
-)
 
 # Security scheme
 security = HTTPBearer()
@@ -200,100 +207,215 @@ class ChallengeContextResponse(BaseModel):
 
 
 @app.post("/users")
-async def create_user(request: CreateUserRequest):
+async def create_user(
+    request: CreateUserRequest,
+    db: Session = Depends(get_db)
+):
     """Create a new user"""
-    # NEEDS SQLALCHEMY GLUE
+    # Implementation with session
+    # Example: user = Users(sub_id=request.sub_id)
+    # db.add(user)
+    # db.commit()
+    # db.refresh(user)
     return {"message": "User creation pending implementation"}
 
 
-@app.get("/tournaments", response_model=List[TournamentResponse])
+@app.get("/tournaments", response_model=List[Tournaments])
 async def list_tournaments(
-    selection_filter: SelectionFilter,
+    selection_filter: SelectionFilter = SelectionFilter.ACTIVE_ONLY,
     page_index: int = 0,
     count: int = 10,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    #current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """List tournaments with filtering"""
-    # NEEDS SQLALCHEMY GLUE
-    return []
+
+    now = datetime.now(timezone.utc)
+    
+    # Start with base select statement
+    statement = select(Tournaments)
+    
+    # Apply filters based on selection_filter
+    if selection_filter == SelectionFilter.PAST_ONLY:
+        statement = statement.where(Tournaments.end_date < now)
+    elif selection_filter == SelectionFilter.ACTIVE_ONLY:
+        statement = statement.where(
+            Tournaments.start_date <= now,
+            Tournaments.end_date >= now
+        )
+    elif selection_filter == SelectionFilter.FUTURE_ONLY:
+        statement = statement.where(Tournaments.start_date > now)
+    elif selection_filter == SelectionFilter.PAST_AND_ACTIVE:
+        statement = statement.where(
+            or_(
+                Tournaments.end_date < now,
+                and_(Tournaments.start_date <= now, Tournaments.end_date >= now)
+            )
+        )
+    elif selection_filter == SelectionFilter.ACTIVE_AND_FUTURE:
+        statement = statement.where(
+            or_(
+                and_(Tournaments.start_date <= now, Tournaments.end_date >= now),
+                Tournaments.start_date > now
+            )
+        )
+    
+    # Apply pagination
+    statement = statement.offset(page_index * count).limit(count)
+    
+    # Execute query
+    tournaments = db.exec(statement).all()
+    
+    # Return directly - FastAPI will handle conversion
+    return tournaments
 
 
-@app.get("/tournaments/{tournament_id}", response_model=TournamentResponse)
+@app.get("/tournaments/{tournament_id}", response_model=Tournaments)
 async def get_tournament(
     tournament_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get a specific tournament"""
-    # NEEDS SQLALCHEMY GLUE
+    # Example: tournament = db.query(Tournaments).filter(Tournaments.id == tournament_id).first()
+    tournament = db.get(Tournaments, tournament_id)
+    if tournament:
+        return tournament
     raise HTTPException(status_code=404, detail="Tournament not found")
 
 
-@app.get("/badges", response_model=List[BadgeResponse])
+@app.get("/badges", response_model=List[Badges])
 async def list_badges(
     user_badges_only: bool = False,
     page_index: int = 0,
     count: int = 10,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """List badges, optionally filtered to user's badges only"""
-    # NEEDS SQLALCHEMY GLUE
-    return []
+    statement = select(Badges)
+    if user_badges_only:
+        statement = statement.join(UserBadges).where(UserBadges.user_id == current_user['id'])
+    statement = statement.offset(page_index * count).limit(count)
+    badges = db.exec(statement).all()
+    return badges
 
 
-@app.get("/badges/{badge_id}", response_model=BadgeResponse)
+@app.get("/badges/{badge_id}", response_model=Badges)
 async def get_badge(
     badge_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get a specific badge"""
-    # NEEDS SQLALCHEMY GLUE
+    badge = db.get(Badges, badge_id)
+    if badge:
+        return badge
     raise HTTPException(status_code=404, detail="Badge not found")
 
 
-@app.get("/challenges", response_model=List[ChallengeResponse])
+@app.get("/challenges", response_model=List[Challenges])
 async def list_challenges(
-    selection_filter: SelectionFilter,
     tournament_id: Optional[int] = None,
     page_index: int = 0,
     count: int = 10,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """List challenges with filtering"""
-    # NEEDS SQLALCHEMY GLUE
-    return []
+    # Example: query = db.query(Challenges)
+    # if tournament_id: query = query.filter(Challenges.tournament_id == tournament_id)
+    statement = select(Challenges)
+    if tournament_id:
+        statement = statement.where(Challenges.tournament_id == tournament_id)
+    statement = statement.offset(page_index * count).limit(count)
+    challenges = db.exec(statement).all()
+    return challenges
 
 
-@app.get("/users/me/badges", response_model=List[UserBadgeResponse])
-async def list_user_badges(
-    page_index: int = 0,
-    count: int = 10,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+
+# start challenge route
+@app.post("/challenges/{challenge_id}/start")
+async def start_challenge(
+    challenge_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """List current user's badges"""
-    # NEEDS SQLALCHEMY GLUE
-    return []
+    """Start a challenge for the current user"""
+    # Example: context = UserChallengeContexts(user_id=current_user['id'], challenge_id=challenge_id, started_at=datetime.now(timezone.utc))
+    # db.add(context)
+    # db.commit()
+    
+    return {"message": "Challenge start pending implementation"}
+
+
+# Route for submitting a message to a challenge agent
+@app.post("/challenges/{challenge_id}/submit_message", response_model=Optional[UserChallengeContexts])
+async def submit_message_to_challenge(
+    challenge_id: int,
+    message: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Submit a message to the challenge agent"""
+    # Example: context = db.query(UserChallengeContexts).filter_by(user_id=current_user['id'], challenge_id=challenge_id).first()
+    # if not context:
+    #     raise HTTPException(status_code=404, detail="Challenge context not found")
+    
+    # Here you would integrate with the Letta agent to send the message
+    # response = send_message_and_check_tools(context.letta_agent_id, message)
+    
+    return None
 
 
 @app.post("/tournaments/{tournament_id}/join")
 async def join_tournament(
     tournament_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Join a tournament"""
-    # NEEDS SQLALCHEMY GLUE
+    # Example: Check if user is already enrolled
+    # existing_enrollment = db.query(UserTournamentEnrollments).filter_by(user_id=current_user['id'], tournament_id=tournament_id).first()
+    # if existing_enrollment:
+    #     return {"message": "User is already enrolled in this tournament"}
+    enrollment: UserTournamentEnrollments = UserTournamentEnrollments(
+        user_id=current_user['id'],
+        tournament_id=tournament_id,
+        enrolled_at=datetime.now(timezone.utc)
+    )
+    db.add(enrollment)
+    db.commit()
+    db.refresh(enrollment)
+    return {"message": "Successfully joined tournament", "enrollment_id": enrollment.id}
+    # Example: enrollment = UserTournamentEnrollments(user_id=current_user['id'], tournament_id=tournament_id)
+    # db.add(enrollment)
+    # db.commit()
+
     return {"message": "Tournament join pending implementation"}
 
+
+# Route for getting user info
+@app.get("/users/me", response_model=UserInfo)
+async def get_current_user_info(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get current user information"""
+    return get_user_info(db, current_user['id'])
+
+
+# agent name: user_id_tournament_id_challenge_id
 
 @app.get("/challenges/{challenge_id}/context", response_model=ChallengeContextResponse)
 async def get_challenge_context(
     challenge_id: int,
-    current_user: Dict[str, Any] = Depends(get_current_user)
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
     """Get challenge context for current user"""
-    # NEEDS SQLALCHEMY GLUE
+    # Example: context = db.query(UserChallengeContexts).filter_by(user_id=current_user['id'], challenge_id=challenge_id).first()
     raise HTTPException(status_code=404, detail="Challenge context not found")
-
-#### END STUBBED CODE
 
 
 @app.get("/health_check")
