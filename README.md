@@ -1,28 +1,13 @@
+# TrustBuilder Wargames AI Backend
+
 [![CodeFactor](https://www.codefactor.io/repository/github/trustbuilder-ai/wargames-ai-backend/badge)](https://www.codefactor.io/repository/github/trustbuilder-ai/wargames-ai-backend)
 
-# Wargames AI Backend
+## Dev Setup
 
-## Setup
+- `make setup`: install uv, uv sync all, CLIs: Claude Code, Gemini 
+- or: `uv sync --all-groups`
 
-1. Create virtual environment:
-```bash
-uv venv
-```
+## Dev Run
 
-2. Activate virtual environment:
-```bash
-source .venv/bin/activate  # On macOS/Linux
-# or
-.venv\Scripts\activate  # On Windows
-```
-
-3. Install dependencies:
-```bash
-uv sync
-```
-
-## Running the Server
-
-```bash
-python src/backend/server.py
-```
+- `make run`
+- or: `uv run python src/backend/server.py`

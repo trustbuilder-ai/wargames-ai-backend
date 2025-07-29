@@ -22,8 +22,50 @@ dependencies = [
     "uvicorn>=0.35.0",
 ]
 
+[dependency-groups]
+dev = [
+    "pyright>=1.1.403",
+    "ruff>=0.11.12",
+]
+
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/backend"]
 
+[tool.uv]
+# package = true
+exclude-newer = "2025-07-29T00:00:00Z"
 
+[tool.ruff]
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+# ignore = ["E203"]  # Whitespace before ':'
+unfixable = ["B"]
+select = [
+    # pycodestyle
+    "E",
+    # Pyflakes
+    "F",
+    # pyupgrade
+    "UP",
+    # isort
+    "I",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src", "tests"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.pyright]
+include = ["src"]
+# extraPaths = ["src"]
+useLibraryCodeForTypes = true
+pythonVersion = "3.12"
+typeCheckingMode = "strict"
