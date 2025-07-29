@@ -3,11 +3,9 @@ from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import jwt
-from jwt import PyJWKClient
+from supabase import create_client, Client
 import os
 from typing import Optional, Dict, Any, List
-import httpx
 from datetime import datetime, timezone
 import logging
 from enum import StrEnum
@@ -45,71 +43,43 @@ security = HTTPBearer()
 
 # Supabase configuration
 SUPABASE_URL = os.getenv("SUPABASE_URL", "YOUR_SUPABASE_URL")
-SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "YOUR_JWT_SECRET")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "YOUR_SERVICE_KEY")
 
-# JWT verification options
-JWT_ALGORITHM = "HS256"
-JWT_AUDIENCE = "authenticated"
+# Initialize Supabase client
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 class SupabaseAuth:
     """Handle Supabase JWT token verification"""
     
     def __init__(self):
-        self.jwt_secret = SUPABASE_JWT_SECRET
-        # For RS256 tokens (if using Supabase's default), use JWKS
-        self.jwks_url = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-        self.jwks_client = PyJWKClient(self.jwks_url)
+        self.supabase = supabase
     
     def verify_token(self, token: str) -> Dict[str, Any]:
-        """Verify JWT token from Supabase"""
+        """Verify JWT token from Supabase using the Supabase client"""
         try:
-            # For HS256 tokens (if configured in Supabase)
-            # decoded = jwt.decode(
-            #     token,
-            #     self.jwt_secret,
-            #     algorithms=[JWT_ALGORITHM],
-            #     audience=JWT_AUDIENCE
-            # )
+            # Use Supabase client to verify token
+            response = self.supabase.auth.get_user(token)
             
-            # For RS256 tokens (Supabase default)
-            signing_key = self.jwks_client.get_signing_key_from_jwt(token)
-            decoded = jwt.decode(
-                token,
-                signing_key.key,
-                algorithms=["RS256"],
-                audience=JWT_AUDIENCE,
-                options={"verify_exp": True}
-            )
+            if not response or not response.user:
+                logger.error("Invalid token - no user returned")
+                raise HTTPException(status_code=401, detail="Invalid token")
             
-            return decoded
+            # Return user data in the expected format
+            user_data = {
+                "sub": response.user.id,  # User ID
+                "email": response.user.email,
+                "role": response.user.role or "authenticated",
+                "app_metadata": response.user.app_metadata or {},
+                "user_metadata": response.user.user_metadata or {},
+                "aud": response.user.aud or "authenticated",
+                "created_at": response.user.created_at
+            }
             
-        except jwt.ExpiredSignatureError:
-            raise HTTPException(status_code=401, detail="Token has expired")
-        except jwt.InvalidTokenError as e:
-            logger.error(f"Invalid token: {str(e)}")
-            raise HTTPException(status_code=401, detail="Invalid token")
+            return user_data
+            
         except Exception as e:
             logger.error(f"Token verification error: {str(e)}")
             raise HTTPException(status_code=401, detail="Could not validate credentials")
-    
-    async def get_user_from_token(self, token: str) -> Dict[str, Any]:
-        """Get user data from Supabase using the token"""
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "apikey": SUPABASE_SERVICE_KEY
-        }
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{SUPABASE_URL}/auth/v1/user",
-                headers=headers
-            )
-            
-            if response.status_code != 200:
-                raise HTTPException(status_code=401, detail="Could not fetch user data")
-            
-            return response.json()
 
 # Initialize auth handler
 auth_handler = SupabaseAuth()
@@ -144,11 +114,8 @@ async def get_current_user_full(
     """Get full user data from Supabase"""
     token = credentials.credentials
     
-    # Verify token first
-    decoded_token = auth_handler.verify_token(token)
-    
-    # Fetch full user data from Supabase
-    user_data = await auth_handler.get_user_from_token(token)
+    # Verify token and get user data in one call
+    user_data = auth_handler.verify_token(token)
     
     return user_data
 
