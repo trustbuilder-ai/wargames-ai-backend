@@ -1,4 +1,5 @@
 import datetime
+from functools import cache
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,9 @@ from uuid import UUID
 from backend.models.supplemental import UserInfo
 
 
+# Bind between sub and local user id should be persistent enough to justify
+# caching.
+@cache
 def ensure_user_exists(session: Session, user_sub: str) -> Users:
     """
     Ensure the user exists in the database. If not, create a new user.

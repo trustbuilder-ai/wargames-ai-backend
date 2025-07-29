@@ -9,17 +9,18 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone
 import logging
 from enum import StrEnum
+import time
 
 from sqlmodel import select, or_, and_
 from sqlmodel import Session
 
-from backend.db_api import get_user_info
+from backend.db_api import get_user_info, ensure_user_exists
 from backend.database.models import (
     Tournaments, Users, Challenges, UserTournamentEnrollments,
     Badges, UserChallengeContexts, UserBadges
 )
 from backend.database.connection import get_db
-from backend.models.supplemental import UserInfo
+from backend.models.supplemental import UserInfo, ChallengeContextResponse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,10 +54,32 @@ class SupabaseAuth:
     
     def __init__(self):
         self.supabase = supabase
+        # Simple in-memory cache: token -> (user_data, expiry_timestamp)
+        # PROS: 
+        #   - Reduces API calls to Supabase during rapid requests (e.g., page loads with multiple API calls)
+        #   - Simple implementation with no external dependencies
+        #   - Fast lookups (O(1) dictionary access)
+        # CONS:
+        #   - No memory limits - could grow unbounded with many unique tokens
+        #   - Not shared across worker processes (each process has its own cache)
+        #   - Lost on server restart
+        #   - No automatic cleanup of expired entries (only cleaned on access)
+        # For production, consider Redis or memcached for distributed caching
+        self.cache = {}
+        self.ttl = 10  # 10 seconds TTL - balance between performance and freshness
     
     def verify_token(self, token: str) -> Dict[str, Any]:
         """Verify JWT token from Supabase using the Supabase client"""
         try:
+            # Check cache first
+            if token in self.cache:
+                user_data, expiry = self.cache[token]
+                if time.time() < expiry:
+                    return user_data
+                else:
+                    # Clean up expired entry
+                    del self.cache[token]
+            
             # Use Supabase client to verify token
             response = self.supabase.auth.get_user(token)
             
@@ -74,6 +97,9 @@ class SupabaseAuth:
                 "aud": response.user.aud or "authenticated",
                 "created_at": response.user.created_at
             }
+            
+            # Store in cache with expiry time
+            self.cache[token] = (user_data, time.time() + self.ttl)
             
             return user_data
             
@@ -128,63 +154,6 @@ class SelectionFilter(StrEnum):
     FUTURE_ONLY = "FUTURE"
     PAST_AND_ACTIVE = "PAST_AND_ACTIVE"
     ACTIVE_AND_FUTURE = "ACTIVE_AND_FUTURE"
-
-
-# Request/Response models
-class CreateUserRequest(BaseModel):
-    email: str
-    password: Optional[str] = None
-
-
-class TournamentResponse(BaseModel):
-    id: int
-    name: str
-    start_date: datetime
-    end_date: datetime
-    description: Optional[str] = None
-
-
-class BadgeResponse(BaseModel):
-    id: int
-    challenge_id: int
-
-
-class ChallengeResponse(BaseModel):
-    id: int
-    name: str
-    tournament_id: int
-    description: Optional[str] = None
-
-
-class UserBadgeResponse(BaseModel):
-    id: int
-    user_id: int
-    badge_id: int
-    awarded_at: datetime
-
-
-class ChallengeContextResponse(BaseModel):
-    id: int
-    can_contribute: bool
-    challenge_id: int
-    started_at: datetime
-    user_id: int
-    letta_agent_id: Optional[int] = None
-    succeeded_at: Optional[datetime] = None
-
-
-@app.post("/users")
-async def create_user(
-    request: CreateUserRequest,
-    db: Session = Depends(get_db)
-):
-    """Create a new user"""
-    # Implementation with session
-    # Example: user = Users(sub_id=request.sub_id)
-    # db.add(user)
-    # db.commit()
-    # db.refresh(user)
-    return {"message": "User creation pending implementation"}
 
 
 @app.get("/tournaments", response_model=List[Tournaments])
@@ -261,8 +230,13 @@ async def list_badges(
 ):
     """List badges, optionally filtered to user's badges only"""
     statement = select(Badges)
+    
     if user_badges_only:
-        statement = statement.join(UserBadges).where(UserBadges.user_id == current_user['id'])
+        # First get the user by sub_id to get the internal user id
+        user = ensure_user_exists(db, current_user['id'])
+        # Now join with UserBadges using the correct internal user id
+        statement = statement.join(UserBadges).where(UserBadges.user_id == user.id)
+    
     statement = statement.offset(page_index * count).limit(count)
     badges = db.exec(statement).all()
     return badges
@@ -302,18 +276,47 @@ async def list_challenges(
 
 
 # start challenge route
-@app.post("/challenges/{challenge_id}/start")
+@app.post("/challenges/{challenge_id}/start", response_model=UserChallengeContexts)
 async def start_challenge(
     challenge_id: int,
     current_user: Dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Start a challenge for the current user"""
-    # Example: context = UserChallengeContexts(user_id=current_user['id'], challenge_id=challenge_id, started_at=datetime.now(timezone.utc))
-    # db.add(context)
-    # db.commit()
+    # Get the internal user id from sub_id
+    user = ensure_user_exists(db, current_user['id'])
     
-    return {"message": "Challenge start pending implementation"}
+    # Check if challenge exists
+    challenge = db.get(Challenges, challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    
+    # Check if user already has a context for this challenge
+    existing_context = db.exec(
+        select(UserChallengeContexts).where(
+            and_(
+                UserChallengeContexts.user_id == user.id,
+                UserChallengeContexts.challenge_id == challenge_id
+            )
+        )
+    ).first()
+    
+    if existing_context:
+        raise HTTPException(status_code=400, detail="Challenge already started")
+    
+    # Create new challenge context
+    context = UserChallengeContexts(
+        user_id=user.id,
+        challenge_id=challenge_id,
+        started_at=datetime.now(timezone.utc),
+        can_contribute=True
+    )
+    
+    db.add(context)
+    db.commit()
+    db.refresh(context)
+    
+    return context
 
 
 # Route for submitting a message to a challenge agent
@@ -331,7 +334,7 @@ async def submit_message_to_challenge(
     
     # Here you would integrate with the Letta agent to send the message
     # response = send_message_and_check_tools(context.letta_agent_id, message)
-    
+
     return None
 
 
@@ -342,10 +345,7 @@ async def join_tournament(
     db: Session = Depends(get_db)
 ):
     """Join a tournament"""
-    # Example: Check if user is already enrolled
-    # existing_enrollment = db.query(UserTournamentEnrollments).filter_by(user_id=current_user['id'], tournament_id=tournament_id).first()
-    # if existing_enrollment:
-    #     return {"message": "User is already enrolled in this tournament"}
+
     enrollment: UserTournamentEnrollments = UserTournamentEnrollments(
         user_id=current_user['id'],
         tournament_id=tournament_id,
@@ -355,11 +355,6 @@ async def join_tournament(
     db.commit()
     db.refresh(enrollment)
     return {"message": "Successfully joined tournament", "enrollment_id": enrollment.id}
-    # Example: enrollment = UserTournamentEnrollments(user_id=current_user['id'], tournament_id=tournament_id)
-    # db.add(enrollment)
-    # db.commit()
-
-    return {"message": "Tournament join pending implementation"}
 
 
 # Route for getting user info
@@ -381,8 +376,27 @@ async def get_challenge_context(
     db: Session = Depends(get_db)
 ):
     """Get challenge context for current user"""
-    # Example: context = db.query(UserChallengeContexts).filter_by(user_id=current_user['id'], challenge_id=challenge_id).first()
-    raise HTTPException(status_code=404, detail="Challenge context not found")
+    # Get the internal user id from sub_id
+    user = ensure_user_exists(db, current_user['id'])
+    
+    # Look up the user's challenge context
+    context = db.exec(
+        select(UserChallengeContexts).where(
+            and_(
+                UserChallengeContexts.user_id == user.id,
+                UserChallengeContexts.challenge_id == challenge_id
+            )
+        )
+    ).first()
+    
+    if not context:
+        raise HTTPException(status_code=404, detail="Challenge not started yet")
+    
+    # Return the context with an empty messages list for now
+    return ChallengeContextResponse(
+        user_challenge_context=context,
+        messages=[]
+    )
 
 
 @app.get("/health_check")
