@@ -1,8 +1,8 @@
-from sqlmodel import Session, select, text
-from fastapi import HTTPException
 import hashlib
-from typing import Optional
 from contextlib import contextmanager
+
+from sqlmodel import Session, text
+
 
 class Locker:
     def __init__(self, db: Session):
@@ -18,7 +18,7 @@ class Locker:
         if not isinstance(resource_identifier, str):
             raise ValueError("Resource identifier must be a string")
         lock_id = int(hashlib.md5(resource_identifier.encode()).hexdigest()[:8], 16)
-        
+
         try:
             # Try to acquire lock with timeout
             result = self.db.exec(
@@ -27,13 +27,10 @@ class Locker:
 
             if not result[0]:
                 # Lock not acquired, wait with timeout
-                wait_result = self.db.exec(
-                    text(f"SELECT pg_advisory_lock({lock_id})")
-                ).first()
+                self.db.exec(text(f"SELECT pg_advisory_lock({lock_id})")).first()
 
             yield
-            
+
         finally:
             # Always release the lock
             self.db.exec(text(f"SELECT pg_advisory_unlock({lock_id})"))
-    

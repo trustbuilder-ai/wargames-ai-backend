@@ -1,0 +1,67 @@
+# LLM Models Configuration
+# Configure which models are available for the wargames backend
+
+models:
+  gpt-4o:
+    provider: openai
+    display_name: "GPT-4o"
+    description: "Most capable OpenAI model, great for complex reasoning"
+    requires_key: "OPENAI_API_KEY"
+    max_tokens: 4096
+
+  gpt-4o-mini:
+    provider: openai
+    display_name: "GPT-4o Mini"
+    description: "Faster and more cost-effective version of GPT-4o"
+    requires_key: "OPENAI_API_KEY"
+    max_tokens: 4096
+
+  claude-3-5-sonnet-20241022:
+    provider: anthropic
+    display_name: "Claude 3.5 Sonnet"
+    description: "Most capable Claude model, excellent for analysis"
+    requires_key: "ANTHROPIC_API_KEY"
+    max_tokens: 4096
+
+  claude-3-5-haiku-20241022:
+    provider: anthropic
+    display_name: "Claude 3.5 Haiku"
+    description: "Fastest Claude model, good for quick responses"
+    requires_key: "ANTHROPIC_API_KEY"
+    max_tokens: 4096
+
+  # Hugging Face Models
+  huggingface/meta-llama/Llama-2-7b-chat-hf:
+    provider: huggingface
+    display_name: "Llama 2 7B Chat"
+    description: "Meta's Llama 2 model for conversational AI"
+    requires_key: "HUGGINGFACE_API_KEY"
+    max_tokens: 4096
+
+  huggingface/microsoft/DialoGPT-large:
+    provider: huggingface
+    display_name: "DialoGPT Large"
+    description: "Microsoft's conversational AI model"
+    requires_key: "HUGGINGFACE_API_KEY"
+    max_tokens: 1024
+
+  # GitHub Models (Azure AI)
+  github/gpt-4o:
+    provider: github
+    display_name: "GPT-4o (GitHub)"
+    description: "OpenAI GPT-4o via GitHub Models"
+    requires_key: "GITHUB_TOKEN"
+    max_tokens: 4096
+
+  github/llama-3.1-70b-instruct:
+    provider: github
+    display_name: "Llama 3.1 70B (GitHub)"
+    description: "Meta Llama 3.1 70B via GitHub Models"
+    requires_key: "GITHUB_TOKEN"
+    max_tokens: 4096
+
+# Default settings
+defaults:
+  temperature: 0.7
+  max_tokens: 4096
+  default_model: "gpt-4o-mini"

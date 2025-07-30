@@ -1,6 +1,6 @@
 .SILENT:
 .ONESHELL:
-.PHONY: setup claude_cli gemini_cli ruff type_check validate quick_validate help
+.PHONY: setup claude_cli gemini_cli run ruff type_check test_all test_llm test_llm_manual test_llm_verbose test_llm_examples validate quick_validate help
 .DEFAULT_GOAL := setup
 
 
@@ -45,6 +45,18 @@ type_check:  ## Check for static typing errors
 
 test_all:  ## Run all tests
 	uv run pytest
+
+test_llm:  ## Run LLM property-based tests with Hypothesis
+	uv run pytest tests/test_llm.py -v
+
+test_llm_manual:  ## Run LLM tests in manual mode (interactive)
+	uv run python tests/test_llm.py
+
+test_llm_verbose:  ## Run LLM tests with Hypothesis statistics
+	uv run pytest tests/test_llm.py -v -s --tb=short
+
+test_llm_examples:  ## Run LLM tests with more examples (thorough)
+	uv run pytest tests/test_llm.py -v
 
 validate:  ## Complete pre-commit validation sequence
 	echo "Running complete validation sequence..."
