@@ -1,34 +1,55 @@
-# Use Python 3.12 slim image to match pyproject.toml requirement
-FROM python:3.12-slim
+# Multi-stage build for optimal image size and build efficiency
+# Stage 1: Build dependencies and generate requirements
+FROM python:3.12-slim AS builder
 
-# Set working directory
-WORKDIR /app
-
-# Copy only pyproject.toml first for better caching
-COPY pyproject.toml .
-
-# Create empty README.md and minimal src structure to satisfy hatchling
-RUN touch README.md && \
-    mkdir -p src/backend && \
-    touch src/backend/__init__.py
-
-# Install pip-tools for better dependency resolution
-RUN pip install --no-cache-dir pip-tools
-
-# Generate requirements.txt from pyproject.toml and install dependencies
-RUN pip-compile pyproject.toml -o requirements.txt && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY . .
-
-# Set environment variables for Cloud Run
-ENV PORT=8080
+ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app/src
 
-# Expose the port
-EXPOSE 8080
+WORKDIR /build
+COPY pyproject.toml README.md uv.lock ./
 
-# Run the FastAPI server with uvicorn
-CMD ["uvicorn", "src.backend.server:app", "--host", "0.0.0.0", "--port", "8080"]
+RUN apt-get update && apt-get install -y \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir uv
+RUN uv sync --frozen --no-dev
+
+
+# Stage 2: Runtime image
+FROM builder AS runtime
+
+# Metadata labels
+LABEL maintainer="TrustBuilder Wargames Team"
+LABEL version="1.0.0"
+LABEL description="TrustBuilder Wargames AI Backend - FastAPI service with Supabase and Letta integration"
+LABEL org.opencontainers.image.title="wargames-ai-backend"
+LABEL org.opencontainers.image.description="FastAPI backend service for TrustBuilder Wargames platform"
+LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.vendor="TrustBuilder"
+# LABEL org.opencontainers.image.licenses="MIT"
+
+ARG PORT="8080"
+ARG HOST="127.0.0.1"
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PORT=${PORT}
+
+WORKDIR /app
+COPY --from=builder /build/.venv /opt/venv
+
+RUN useradd --create-home --shell /bin/bash --uid 1000 appuser
+COPY --chown=appuser:appuser . .
+
+RUN apt-get update && apt-get install -y \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN mkdir -p logs && chown -R appuser:appuser logs
+
+USER appuser
+EXPOSE ${PORT}
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://${HOST}:${PORT}/health_check || exit 1
+CMD ["python", "-m", "uvicorn", "backend.server:app", "--host", "${HOST}", "--port", "${PORT}"]

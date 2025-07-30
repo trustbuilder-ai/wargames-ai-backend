@@ -17,6 +17,7 @@ This file provides guidance for AI coding agents working on the TrustBuilder War
 - [Style, Patterns & Documentation](#style-patterns--documentation) - Coding standards and patterns
 - [API Development Guidelines](#api-development-guidelines) - FastAPI patterns and best practices
 - [Agent Integration](#agent-integration) - Letta agent patterns and workflows
+- [LLM Integration Guidelines](#llm-integration-guidelines) - LiteLLM patterns and best practices
 - [Code Review & PR Guidelines](#code-review--pr-guidelines) - Quality assurance
 
 ### Reference
@@ -392,6 +393,47 @@ async def endpoint(
 - Use `send_message_and_check_tools()` for agent interactions
 - Handle tool calls and responses appropriately in the API layer
 
+## LLM Integration Guidelines
+
+### LiteLLM Integration Best Practices
+
+**Module Organization:**
+- `src/backend/llm/client.py` - Direct LiteLLM API calls and response conversion
+- `src/backend/llm/config.py` - Model configuration and environment management  
+- `src/backend/llm/settings.py` - API key management with pydantic-settings
+- `src/backend/models/llm.py` - Pydantic data models for type safety
+
+**API Key Management:**
+- Use pydantic-settings for automatic .env.litellm file loading
+- Never hardcode API keys in source code
+- Check provider availability before making API calls
+- Handle missing API keys gracefully with informative error messages
+
+**Model Configuration:**
+- Define models in `llm_config.yaml`
+- Only expose models with valid API keys via `/llm/models` endpoint
+- Handle provider model name versioning (e.g., `github/gpt-4o` → `github/gpt-4o-2024-11-20`)
+- Support multiple providers: OpenAI, Anthropic, GitHub, Hugging Face
+
+**Error Handling:**
+- Use custom exception hierarchy: `LLMClientError`, `LLMValidationError`, `LLMAPIError`
+- Log API errors without exposing sensitive information
+- Validate requests using Pydantic models before API calls
+- Handle rate limits and provider-specific errors
+
+**Testing Patterns:**
+- Use property-based testing with Hypothesis for robust validation
+- Test with real API calls during development, mock for CI/CD
+- Handle model name versioning in tests automatically
+- Test both successful responses and error conditions
+- Include integration tests with `scripts/test_api.sh`
+
+**Performance Optimization:**
+- Use appropriate timeouts for API calls
+- Implement request/response caching where appropriate
+- Log performance metrics for monitoring
+- Use async/await patterns throughout
+
 ## Code Review & PR Guidelines
 
 ### Commit and PR Requirements
@@ -439,6 +481,10 @@ async def endpoint(
 | `make ruff` | Format code and fix linting | Ruff installed | Try `uv run ruff format && uv run ruff check --fix` |
 | `make type_check` | Run pyright static type checking | Pyright installed | Try `uv run pyright` |
 | `make test_all` | Run all tests with pytest | Pytest installed | Try `uv run pytest` |
+| `make test_llm` | Run LLM property-based tests | LLM test dependencies | Try `uv run pytest tests/test_llm.py` |
+| `make test_llm_verbose` | Run LLM tests with verbose output | Same as above | Add `-v -s --tb=short` flags |
+| `make test_llm_manual` | Run LLM tests in interactive mode | Same as above | Try `uv run python tests/test_llm.py` |
+| `scripts/test_api.sh` | Test LLM API endpoints integration | Server running, API keys set | Check server and keys |
 | `make validate` | Complete pre-commit validation | Above dependencies | Run individual commands manually |
 | `make quick_validate` | Fast development validation | Ruff and Pyright installed | Run `make ruff && make type_check` |
 | `uv run pytest <path>` | Run specific test file/function | Pytest available | Check test file exists and syntax |
@@ -573,6 +619,36 @@ Agents should add new patterns discovered during development here.
 - **Example**: See `src/backend/server.py:52-111` for SupabaseAuth implementation with cache
 - **Validation**: Authentication works with 10-second cache TTL, reducing Supabase API calls during rapid requests
 - **References**: Pattern used consistently across all authenticated endpoints
+
+#### Learned Pattern: LLM API Key Integration with Pydantic-Settings
+
+- **Date**: 2025-07-30T19:00:00Z
+- **Context**: LiteLLM integration requiring secure API key management across multiple providers
+- **Problem**: Need to load API keys from environment files, validate provider availability, and pass keys to LiteLLM
+- **Solution**: Use pydantic-settings with APIKeySettings class to auto-load from .env.litellm files, check provider availability, and pass keys explicitly to litellm.acompletion()
+- **Example**: See `src/backend/llm/settings.py` for APIKeySettings and `src/backend/llm/client.py:121-135` for key passing
+- **Validation**: All tests pass with real API calls to Claude and GitHub models, health endpoint shows correct provider status
+- **References**: Fixed import order issue and API key integration, all LLM tests now pass
+
+#### Learned Pattern: Property-Based Testing for LLM Integration
+
+- **Date**: 2025-07-30T19:00:00Z
+- **Context**: Testing LLM integration with multiple providers and model name variations
+- **Problem**: Need robust testing that handles provider model name versioning (e.g. github/gpt-4o becomes github/gpt-4o-2024-11-20)
+- **Solution**: Use Hypothesis for property-based testing with flexible model name assertions and comprehensive error handling
+- **Example**: See `tests/test_llm.py:182-184` for model name versioning handling and comprehensive test coverage
+- **Validation**: All 5 LLM tests pass including property-based tests, integration tests, and response consistency checks
+- **References**: Fixed test assertions and Makefile flags, comprehensive test suite with 5 test categories
+
+#### Learned Pattern: Multi-Stage Docker Builds for Python Applications
+
+- **Date**: 2025-07-30T19:00:00Z
+- **Context**: Docker containerization for FastAPI backend with multiple dependencies
+- **Problem**: Need optimal image size and build efficiency while managing Python dependencies and system packages
+- **Solution**: Use multi-stage builds with pip-tools for dependency resolution, virtual environments for isolation, and minimal runtime dependencies
+- **Example**: See `Dockerfile` with builder and runtime stages, pip-tools for requirements generation
+- **Validation**: Smaller runtime image with only necessary dependencies, secure non-root user, health checks included
+- **References**: Chose pip-tools over uv for more reliable dependency export in containerized environments
 
 ## Agent Quick Reference - Critical Reminders
 
