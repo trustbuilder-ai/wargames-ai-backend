@@ -20,7 +20,7 @@ from backend.database.models import (
     Badges, UserChallengeContexts, UserBadges
 )
 from backend.database.connection import get_db
-from backend.models.supplemental import UserInfo, ChallengeContextResponse
+from backend.models.supplemental import LLMRole, Message, UserInfo, ChallengeContextResponse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -397,6 +397,23 @@ async def get_challenge_context(
         user_challenge_context=context,
         messages=[]
     )
+
+# Get sample messages endpoint
+@app.get("/sample_messages", response_model=List[Message])
+def get_sample_messages(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get sample messages for testing purposes."""
+    return [
+        Message(role=LLMRole.SYSTEM, content="Sample system message"),
+        Message(role=LLMRole.USER, content="Sample user message"),
+        Message(role=LLMRole.ASSISTANT, content="Sample assistant response"),
+        Message(role=LLMRole.ERROR, content="Sample error message"),
+        Message(role=LLMRole.TOOL_CALL, content="Sample tool call message", tool_name="SampleTool"),
+        Message(role=LLMRole.TOOL_RESULT, content="Sample tool result message", tool_name="SampleTool"),
+        Message(role=LLMRole.MODEL, content="Sample model message"),
+    ]
 
 
 @app.get("/health_check")

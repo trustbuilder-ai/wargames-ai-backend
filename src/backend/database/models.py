@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKeyConstraint, Index, Integer, PrimaryKeyConstraint, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKeyConstraint, Identity, Index, Integer, PrimaryKeyConstraint, Text, UniqueConstraint, text
 from sqlmodel import Field, Relationship, SQLModel
 
 class Tournaments(SQLModel, table=True):
@@ -32,6 +32,7 @@ class Users(SQLModel, table=True):
 
     user_tournament_enrollments: List['UserTournamentEnrollments'] = Relationship(back_populates='user')
     user_challenge_contexts: List['UserChallengeContexts'] = Relationship(back_populates='user')
+    user_message_metadata: List['UserMessageMetadata'] = Relationship(back_populates='user')
     user_badges: List['UserBadges'] = Relationship(back_populates='user')
 
 
@@ -52,6 +53,7 @@ class Challenges(SQLModel, table=True):
     tournament: Optional['Tournaments'] = Relationship(back_populates='challenges')
     badges: List['Badges'] = Relationship(back_populates='challenge')
     user_challenge_contexts: List['UserChallengeContexts'] = Relationship(back_populates='challenge')
+    user_message_metadata: List['UserMessageMetadata'] = Relationship(back_populates='challenge')
 
 
 class UserTournamentEnrollments(SQLModel, table=True):
@@ -104,11 +106,31 @@ class UserChallengeContexts(SQLModel, table=True):
     challenge_id: int = Field(sa_column=Column('challenge_id', Integer))
     started_at: datetime = Field(sa_column=Column('started_at', DateTime(True)))
     user_id: int = Field(sa_column=Column('user_id', Integer))
-    letta_agent_id: Optional[int] = Field(default=None, sa_column=Column('letta_agent_id', Integer))
+    letta_agent_id: Optional[str] = Field(default=None, sa_column=Column('letta_agent_id', Text))
     succeeded_at: Optional[datetime] = Field(default=None, sa_column=Column('succeeded_at', DateTime(True)))
 
     challenge: Optional['Challenges'] = Relationship(back_populates='user_challenge_contexts')
     user: Optional['Users'] = Relationship(back_populates='user_challenge_contexts')
+
+
+class UserMessageMetadata(SQLModel, table=True):
+    __tablename__ = 'user_message_metadata'
+    __table_args__ = (
+        ForeignKeyConstraint(['challenge_id'], ['challenges.id'], name='user_message_metadata_challenge_id_fkey'),
+        ForeignKeyConstraint(['user_id'], ['users.id'], name='user_message_metadata_user_id_fkey'),
+        PrimaryKeyConstraint('id', name='user_message_metadata_pkey'),
+        Index('idx_user_message_metadata_created_at', 'created_at'),
+        Index('idx_user_message_metadata_user_id', 'user_id')
+    )
+
+    id: Optional[int] = Field(default=None, sa_column=Column('id', BigInteger, Identity(start=1, increment=1, minvalue=1, maxvalue=9223372036854775807, cycle=False, cache=1), primary_key=True))
+    created_at: datetime = Field(sa_column=Column('created_at', DateTime(True), server_default=text('now()')))
+    user_id: Optional[int] = Field(default=None, sa_column=Column('user_id', Integer))
+    content_length: Optional[int] = Field(default=None, sa_column=Column('content_length', BigInteger))
+    challenge_id: Optional[int] = Field(default=None, sa_column=Column('challenge_id', Integer))
+
+    challenge: Optional['Challenges'] = Relationship(back_populates='user_message_metadata')
+    user: Optional['Users'] = Relationship(back_populates='user_message_metadata')
 
 
 class UserBadges(SQLModel, table=True):

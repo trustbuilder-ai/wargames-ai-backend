@@ -2,6 +2,7 @@
 
 from typing import Optional
 from pydantic import BaseModel
+from strenum import StrEnum
 
 from backend.database.models import Badges, Challenges, Tournaments, UserChallengeContexts
 
@@ -21,10 +22,21 @@ class UserInfo(BaseModel):
         arbitrary_types_allowed = True  # Allow using SQLModel types directly
 
 
+class LLMRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+    MODEL = "model"
+    SYSTEM = "system"
+    TOOL = "tool"
+    TOOL_CALL = "tool_call"
+    TOOL_RESULT = "tool result"
+    ERROR = "error"
+    UNKNOWN = "unknown role"
+
+
 class Message(BaseModel):
-    role: str
+    role: LLMRole
     content: str
-    is_tool_call: bool = False
     tool_name: Optional[str] = None
 
 
