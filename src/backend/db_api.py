@@ -1,15 +1,17 @@
-import datetime
+from datetime import UTC, datetime
 from functools import cache
-from typing import Optional
 
-from sqlalchemy.orm import Session
-from backend.database.models import UserBadges, Users, UserTournamentEnrollments, Challenges, Badges, UserChallengeContexts, Tournaments
-from datetime import datetime, timezone
-from typing import Optional
-from sqlmodel import Session, select, and_, or_
-from sqlalchemy.orm import selectinload
-from uuid import UUID
+from sqlmodel import Session, and_, select
 
+from backend.database.models import (
+    Badges,
+    Challenges,
+    Tournaments,
+    UserBadges,
+    UserChallengeContexts,
+    Users,
+    UserTournamentEnrollments,
+)
 from backend.models.supplemental import UserInfo
 
 
@@ -30,36 +32,37 @@ def ensure_user_exists(session: Session, user_sub: str) -> Users:
     return user
 
 
-def get_user_info(session: Session, user_sub: str) -> Optional[UserInfo]:
+def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
     """
     Get user active tournaments, badges, and active challenges.
     If the user isn't in the postgres db for joining, add the user, and
     return the user data.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     user: Users = ensure_user_exists(session, user_sub)
     active_tournaments = session.exec(
-        select(Tournaments).join(UserTournamentEnrollments)
+        select(Tournaments)
+        .join(UserTournamentEnrollments)
         .where(
             and_(
                 UserTournamentEnrollments.user_id == user.id,
                 Tournaments.start_date <= now,
-                Tournaments.end_date >= now
+                Tournaments.end_date >= now,
             )
         )
     ).all()
     active_challenges = session.exec(
-        select(Challenges).join(UserChallengeContexts)
+        select(Challenges)
+        .join(UserChallengeContexts)
         .where(
             and_(
                 UserChallengeContexts.user_id == user.id,
-                Challenges.tournament_id.in_([t.id for t in active_tournaments])
+                Challenges.tournament_id.in_([t.id for t in active_tournaments]),
             )
         )
     ).all()
     badges = session.exec(
-        select(Badges).join(UserBadges)
-        .where(UserBadges.user_id == user.id)
+        select(Badges).join(UserBadges).where(UserBadges.user_id == user.id)
     ).all()
 
     return UserInfo(
@@ -67,5 +70,5 @@ def get_user_info(session: Session, user_sub: str) -> Optional[UserInfo]:
         email=None,  # Email is not stored in the Users model
         active_tournaments=active_tournaments,
         active_challenges=active_challenges,
-        badges=badges
+        badges=badges,
     )

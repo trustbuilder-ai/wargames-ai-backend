@@ -1,14 +1,13 @@
-from functools import cache
 import os
-from typing import Optional, Generator
+from collections.abc import Generator
+from functools import cache
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.automap import AutomapBase, automap_base
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session
-
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -22,11 +21,11 @@ def get_sqlalchemy_engine(sqlalchemy_url: str) -> Engine:
     # https://stackoverflow.com/questions/26891971/mysql-connection-not-available-when-use-sqlalchemymysql-and-flask
     # https://docs.sqlalchemy.org/en/20/core/engines.html#sqlalchemy.create_engine.params.pool_recycle
     return create_engine(
-        sqlalchemy_url, 
+        sqlalchemy_url,
         pool_recycle=3600,
         pool_size=5,
         max_overflow=10,
-        pool_pre_ping=True
+        pool_pre_ping=True,
     )
 
 
@@ -36,7 +35,7 @@ SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=get_sqlalchemy_engine(SQLALCHEMY_URL),
-    class_=Session
+    class_=Session,
 )
 
 
@@ -59,8 +58,9 @@ def _get_db() -> Session:
     """
     return SessionLocal()
 
+
 @cache
-def get_sqlalchemy_base(engine: Optional[Engine] = None) -> AutomapBase:
+def get_sqlalchemy_base(engine: Engine | None = None) -> AutomapBase:
     if engine is None:
         engine: Engine = get_sqlalchemy_engine(SQLALCHEMY_URL)
     Base: AutomapBase = automap_base()
