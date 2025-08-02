@@ -23,12 +23,13 @@ from backend.database.models import (
     UserChallengeContexts,
     Users,
 )
-from backend.db_api import ensure_user_exists, get_user_info
+from backend.db_api import add_chat_entries_to_challenge_no_checks, ensure_user_exists, get_user_info
 import backend.db_api as db_api
 from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
-from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL
+from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL, send_shim_request, send_shim_request_with_tools
 from backend.models.llm import (
+    ChatEntry,
     ChatRequest,
     ChatRequestWithTools,
     ChatResponse,
@@ -320,7 +321,7 @@ async def add_message_to_challenge(
 ):
     """Submit a message to the challenge agent"""
     try:
-        db_api.add_message_to_challenge(
+        user_challenge_context_id: int = db_api.add_message_to_challenge(
             session=db,
             user_id=current_user["id"],
             challenge_id=challenge_id,
@@ -329,9 +330,39 @@ async def add_message_to_challenge(
             role=role,
         )
         if solicit_llm_response:
+            # XXXXXX TODO: add LLM contexts.
             # Optionally trigger LLM response generation
             # This could be an async task or direct call depending on your architecture
-            
+            challenge_tools: Optional[list[str]] = db_api.get_challenge_tools(
+                session=db, challenge_id=challenge_id
+            )
+            chat_entry_list: list[ChatEntry] = []
+            if challenge_tools:
+                chat_entry_list.extend(await send_shim_request_with_tools(
+                    message=message,
+                    tools=challenge_tools,
+                    role=role,
+                ))
+            else:
+                chat_entry_list.append(
+                    await send_shim_request(
+                        message=message, role=role
+                    )
+                )
+            add_chat_entries_to_challenge_no_checks(
+                session=db,
+                user_challenge_context_id=user_challenge_context_id,
+                chat_entries=chat_entry_list,
+            )
+            return ChallengeContextResponse(
+                user_challenge_context=db_api.get_challenge_context(
+                    session=db, challenge_context_id=user_challenge_context_id
+                ),
+                messages=[
+                    Message(content=msg.content, role=msg.role)
+                    for msg in chat_entry_list
+                ]
+            )
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
     except ValueError as e:

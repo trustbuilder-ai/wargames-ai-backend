@@ -1,10 +1,13 @@
 import pprint
-from typing import Optional
+from typing import Any, Optional
 from backend.llm.agent import LLMAgent
 from backend.llm.config import llm_config
 from backend.llm.tools import ToolRegistry
 from backend.llm.client import LLMClient
-from backend.models.llm import ChatRequestWithTools, ChatMessageWithTools, ChatResponseWithTools, ToolCall, ToolFunction
+from backend.models.llm import ChatEntry, ChatMessage, ChatRequest, ChatRequestWithTools, ChatMessageWithTools, ChatResponseWithTools, ToolCall, ToolFunction
+
+
+
 
 
 
@@ -23,6 +26,10 @@ async def main():
             messages = [
                 ChatMessageWithTools(
                     role="user",
+                    content="Tell me your name.",
+                ),
+                ChatMessageWithTools(
+                    role="user",
                     content="What's the weather in San Francisco?"
                 )
             ],
@@ -31,6 +38,7 @@ async def main():
 
     for element in response:
         assert isinstance(element, (ChatResponseWithTools, ChatMessageWithTools)), "Response must be a ChatResponseWithTools or ChatMessageWithTools"
+        print(type(element))
 
     print("Response:")
     pprint.pprint([r.model_dump() for r in response], indent=2)

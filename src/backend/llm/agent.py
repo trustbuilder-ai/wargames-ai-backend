@@ -112,9 +112,11 @@ class LLMAgent:
         # Execute the tool calls
         tool_results = await self._execute_tool_calls(tool_calls, mock_mode)
 
+        response_messages: list[ChatMessageWithTools|ChatResponseWithTools] = []
+
         # Add assistant message with tool calls to history
-        assistant_message = response.choices[0].message
-        current_messages.append(assistant_message)
+        assistant_message: ChatMessageWithTools = response.choices[0].message
+        response_messages.append(assistant_message)
 
         # Add tool results to messages
         for result in tool_results:
@@ -123,9 +125,9 @@ class LLMAgent:
                 content=result.output or result.error or "No output",
                 tool_call_id=result.tool_call_id,
             )
-            current_messages.append(tool_message)
+            response_messages.append(tool_message)
 
-        return current_messages
+        return response_messages
 
     async def _make_tool_aware_request(
         self,

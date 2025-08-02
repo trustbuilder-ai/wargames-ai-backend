@@ -291,4 +291,4 @@ class ConversationTurn(BaseModel):
 
 
 
-ChatEntry = ChatRequest | ChatResponse | ChatRequestWithTools | ChatResponseWithTools
+ChatEntry = ChatMessage | ChatResponse | ChatMessageWithTools | ChatResponseWithTools
