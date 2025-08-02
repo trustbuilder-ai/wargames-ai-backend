@@ -4,7 +4,7 @@ import os
 import time
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
@@ -19,10 +19,13 @@ from backend.database.models import (
     Challenges,
     Tournaments,
     UserBadges,
+    UserChallengeContextMessages,
     UserChallengeContexts,
-    UserTournamentEnrollments,
+    Users,
 )
 from backend.db_api import ensure_user_exists, get_user_info
+import backend.db_api as db_api
+from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
 from backend.models.llm import (
     ChatRequest,
@@ -30,7 +33,7 @@ from backend.models.llm import (
     LLMHealthStatus,
     ModelsResponse,
 )
-from backend.models.supplemental import ChallengeContextResponse, UserInfo
+from backend.models.supplemental import ChallengeContextResponse, Message, SelectionFilter, UserInfo
 from backend.util.log import logger
 
 # Initialize FastAPI
@@ -94,7 +97,7 @@ class SupabaseAuth:
         #   - Lost on server restart
         #   - No automatic cleanup of expired entries (only cleaned on access)
         # For production, consider Redis or memcached for distributed caching
-        self.cache = {}
+        self.cache: dict[str, tuple[dict[str, Any], float]] = {}
         self.ttl = 10  # 10 seconds TTL - balance between performance and freshness
 
     def verify_token(self, token: str) -> dict[str, Any]:
@@ -192,14 +195,6 @@ async def get_current_user_full(
 #### START STUBBED CODE
 
 
-class SelectionFilter(StrEnum):
-    PAST_ONLY = "PAST"
-    ACTIVE_ONLY = "ACTIVE"
-    FUTURE_ONLY = "FUTURE"
-    PAST_AND_ACTIVE = "PAST_AND_ACTIVE"
-    ACTIVE_AND_FUTURE = "ACTIVE_AND_FUTURE"
-
-
 @app.get("/tournaments", response_model=list[Tournaments])
 async def list_tournaments(
     selection_filter: SelectionFilter = SelectionFilter.ACTIVE_ONLY,
@@ -209,44 +204,12 @@ async def list_tournaments(
     db: Session = Depends(get_db),
 ):
     """List tournaments with filtering"""
-
-    now = datetime.now(UTC)
-
-    # Start with base select statement
-    statement = select(Tournaments)
-
-    # Apply filters based on selection_filter
-    if selection_filter == SelectionFilter.PAST_ONLY:
-        statement = statement.where(Tournaments.end_date < now)
-    elif selection_filter == SelectionFilter.ACTIVE_ONLY:
-        statement = statement.where(
-            Tournaments.start_date <= now, Tournaments.end_date >= now
-        )
-    elif selection_filter == SelectionFilter.FUTURE_ONLY:
-        statement = statement.where(Tournaments.start_date > now)
-    elif selection_filter == SelectionFilter.PAST_AND_ACTIVE:
-        statement = statement.where(
-            or_(
-                Tournaments.end_date < now,
-                and_(Tournaments.start_date <= now, Tournaments.end_date >= now),
-            )
-        )
-    elif selection_filter == SelectionFilter.ACTIVE_AND_FUTURE:
-        statement = statement.where(
-            or_(
-                and_(Tournaments.start_date <= now, Tournaments.end_date >= now),
-                Tournaments.start_date > now,
-            )
-        )
-
-    # Apply pagination
-    statement = statement.offset(page_index * count).limit(count)
-
-    # Execute query
-    tournaments = db.exec(statement).all()
-
-    # Return directly - FastAPI will handle conversion
-    return tournaments
+    return db_api.list_tournaments(
+        session=db,
+        selection_filter=selection_filter,
+        page_index=page_index,
+        count=count
+    )
 
 
 @app.get("/tournaments/{tournament_id}", response_model=Tournaments)
@@ -310,13 +273,12 @@ async def list_challenges(
     """List challenges with filtering"""
     # Example: query = db.query(Challenges)
     # if tournament_id: query = query.filter(Challenges.tournament_id == tournament_id)
-    statement = select(Challenges)
-    if tournament_id:
-        statement = statement.where(Challenges.tournament_id == tournament_id)
-    statement = statement.offset(page_index * count).limit(count)
-    challenges = db.exec(statement).all()
-    return challenges
-
+    return db_api.list_challenges(
+        session=db,
+        tournament_id=tournament_id,
+        page_index=page_index,
+        count=count
+    )
 
 # start challenge route
 @app.post("/challenges/{challenge_id}/start", response_model=UserChallengeContexts)
@@ -327,45 +289,27 @@ async def start_challenge(
 ):
     """Start a challenge for the current user"""
     # Get the internal user id from sub_id
-    user = ensure_user_exists(db, current_user["id"])
+    user: Users = ensure_user_exists(db, current_user["id"])
 
-    # Check if challenge exists
+    # Ensure user.id is not None (should always be set after ensure_user_exists)
+    if user.id is None:
+        raise HTTPException(status_code=500, detail="User ID not found")
+
     challenge = db.get(Challenges, challenge_id)
     if not challenge:
         raise HTTPException(status_code=404, detail="Challenge not found")
 
-    # Check if user already has a context for this challenge
-    existing_context = db.exec(
-        select(UserChallengeContexts).where(
-            and_(
-                UserChallengeContexts.user_id == user.id,
-                UserChallengeContexts.challenge_id == challenge_id,
-            )
-        )
-    ).first()
-
-    if existing_context:
-        raise HTTPException(status_code=400, detail="Challenge already started")
-
-    # Create new challenge context
-    context = UserChallengeContexts(
-        user_id=user.id,
-        challenge_id=challenge_id,
-        started_at=datetime.now(UTC),
-        can_contribute=True,
-    )
-
-    db.add(context)
-    db.commit()
-    db.refresh(context)
-
-    return context
+    try:
+        assert challenge.id is not None, "Challenge ID should not be None"
+        db_api.start_challenge(db, user.id, challenge.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # Route for submitting a message to a challenge agent
 @app.post(
     "/challenges/{challenge_id}/submit_message",
-    response_model=UserChallengeContexts | None,
+    response_model=ChallengeContextResponse,
 )
 async def submit_message_to_challenge(
     challenge_id: int,
@@ -374,15 +318,18 @@ async def submit_message_to_challenge(
     db: Session = Depends(get_db),
 ):
     """Submit a message to the challenge agent"""
-    # Example: context = db.query(UserChallengeContexts)
-    #   .filter_by(user_id=current_user['id'], challenge_id=challenge_id).first()
-    # if not context:
-    #     raise HTTPException(status_code=404, detail="Challenge context not found")
+    try:
+        db_api.add_message_to_challenge(
+            session=db,
+            user_id=current_user["id"],
+            challenge_id=challenge_id,
+            message=message,
+        )
 
-    # Here you would integrate with the Letta agent to send the message
-    # response = send_message_and_check_tools(context.letta_agent_id, message)
-
-    return None
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=e.message)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/tournaments/{tournament_id}/join")
@@ -393,15 +340,18 @@ async def join_tournament(
 ):
     """Join a tournament"""
 
-    enrollment: UserTournamentEnrollments = UserTournamentEnrollments(
-        user_id=current_user["id"],
-        tournament_id=tournament_id,
-        enrolled_at=datetime.now(UTC),
-    )
-    db.add(enrollment)
-    db.commit()
-    db.refresh(enrollment)
-    return {"message": "Successfully joined tournament", "enrollment_id": enrollment.id}
+    user: Users = ensure_user_exists(db, current_user["id"])
+    assert user.id is not None, "User ID should not be None"
+    # Check if tournament exists and is active.
+    try:
+        db_api.join_tournament(
+            db, user.id, tournament_id
+        )
+        return {"message": "Successfully joined tournament"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e.message))
 
 
 # Route for getting user info
@@ -412,9 +362,6 @@ async def get_current_user_info(
 ):
     """Get current user information"""
     return get_user_info(db, current_user["id"])
-
-
-# agent name: user_id_tournament_id_challenge_id
 
 
 @app.get("/challenges/{challenge_id}/context", response_model=ChallengeContextResponse)
@@ -440,8 +387,14 @@ async def get_challenge_context(
     if not context:
         raise HTTPException(status_code=404, detail="Challenge not started yet")
 
+    messages = db.exec(
+        select(UserChallengeContextMessages).where(
+            UserChallengeContextMessages.user_challenge_context_id == context.id
+        )
+    ).all()
+
     # Return the context with an empty messages list for now
-    return ChallengeContextResponse(user_challenge_context=context, messages=[])
+    return ChallengeContextResponse(user_challenge_context=context, messages=[Message(content=msg.content, role="User") for msg in messages])
 
 
 # LLM endpoints

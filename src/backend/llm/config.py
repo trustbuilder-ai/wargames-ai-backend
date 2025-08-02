@@ -5,11 +5,13 @@ This module handles model configuration loading from YAML file.
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
 from backend.llm.settings import api_keys
-
+from backend.llm.tools import ToolRegistry
+import backend
 
 @dataclass
 class ModelConfig:
@@ -26,9 +28,14 @@ class ModelConfig:
 class LLMConfig:
     """Simple LLM configuration manager."""
 
-    def __init__(self, config_path: str = "llm_config.yaml"):
+    # Default to LLMConfig in project root (backend/llm_config.yaml),
+    # deriving the path from the backend module directory using pathlib.
+    # for path compatibility across different environments.
+    def __init__(self, config_path: str|Path = Path(backend.__path__[0]).parent.parent / "llm_config.yaml"): # type: ignore
         """Initialize LLM configuration from YAML file."""
+        print(f"Config path: {config_path}")
         self._models: dict[str, ModelConfig] = {}
+        self._tool_registry: ToolRegistry | None = None
         self.default_temperature = 0.7
         self.default_max_tokens = 4096
         self.default_model = "gpt-4o-mini"
@@ -63,6 +70,11 @@ class LLMConfig:
             self.default_temperature = defaults.get("temperature", 0.7)
             self.default_max_tokens = defaults.get("max_tokens", 4096)
             self.default_model = defaults.get("default_model", "gpt-4o-mini")
+
+            # Load tools if present
+            if "tools" in config:
+                self._tool_registry = ToolRegistry()
+                self._tool_registry.load_from_config(config["tools"])
 
         except Exception as e:
             print(f"Error loading config from {config_path}: {e}")
@@ -102,6 +114,22 @@ class LLMConfig:
         if model is None:
             return False
         return api_keys.is_provider_available(model.provider)
+
+    def get_tool_registry(self) -> ToolRegistry | None:
+        """Get the tool registry if tools are configured.
+
+        Returns:
+            ToolRegistry instance or None if no tools configured.
+        """
+        return self._tool_registry
+
+    def has_tools(self) -> bool:
+        """Check if any tools are configured.
+
+        Returns:
+            True if tools are available.
+        """
+        return self._tool_registry is not None
 
 
 # Global configuration instance

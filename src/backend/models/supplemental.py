@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from strenum import StrEnum
 
 from backend.database.models import (
     Badges,
@@ -35,3 +36,11 @@ class Message(BaseModel):
 class ChallengeContextResponse(BaseModel):
     user_challenge_context: UserChallengeContexts
     messages: list[Message] = []
+
+
+class SelectionFilter(StrEnum):
+    PAST_ONLY = "PAST"
+    ACTIVE_ONLY = "ACTIVE"
+    FUTURE_ONLY = "FUTURE"
+    PAST_AND_ACTIVE = "PAST_AND_ACTIVE"
+    ACTIVE_AND_FUTURE = "ACTIVE_AND_FUTURE"
