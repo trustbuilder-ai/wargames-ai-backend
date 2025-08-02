@@ -321,9 +321,10 @@ async def add_message_to_challenge(
 ):
     """Submit a message to the challenge agent"""
     try:
+        user: Users = ensure_user_exists(db, current_user["id"])
         user_challenge_context_id: int = db_api.add_message_to_challenge(
             session=db,
-            user_id=current_user["id"],
+            user_id=user.id,
             challenge_id=challenge_id,
             model=DEFAULT_CHAT_COMPLETION_MODEL,
             message=message,
@@ -354,14 +355,10 @@ async def add_message_to_challenge(
                 user_challenge_context_id=user_challenge_context_id,
                 chat_entries=chat_entry_list,
             )
-            return ChallengeContextResponse(
-                user_challenge_context=db_api.get_challenge_context(
-                    session=db, challenge_context_id=user_challenge_context_id
-                ),
-                messages=[
-                    Message(content=msg.content, role=msg.role)
-                    for msg in chat_entry_list
-                ]
+            return db_api.get_challenge_context_response(
+                session=db,
+                user_id=user.id,
+                challenge_id=challenge_id,
             )
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
@@ -411,27 +408,15 @@ async def get_challenge_context(
     # Get the internal user id from sub_id
     user = ensure_user_exists(db, current_user["id"])
 
-    # Look up the user's challenge context
-    context = db.exec(
-        select(UserChallengeContexts).where(
-            and_(
-                UserChallengeContexts.user_id == user.id,
-                UserChallengeContexts.challenge_id == challenge_id,
-            )
+    # Get the challenge context for the user
+    try:
+        return db_api.get_challenge_context_response(
+            session=db,
+            user_id=user.id,
+            challenge_id=challenge_id,
         )
-    ).first()
-
-    if not context:
-        raise HTTPException(status_code=404, detail="Challenge not started yet")
-
-    messages = db.exec(
-        select(UserChallengeContextMessages).where(
-            UserChallengeContextMessages.user_challenge_context_id == context.id
-        )
-    ).all()
-
-    # Return the context with an empty messages list for now
-    return ChallengeContextResponse(user_challenge_context=context, messages=[Message(content=msg.content, role="User") for msg in messages])
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Challenge not found")
 
 
 # LLM endpoints
