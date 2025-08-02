@@ -288,3 +288,7 @@ class ConversationTurn(BaseModel):
     request: ChatRequestWithTools
     response: ChatResponseWithTools
     tool_results: list[ToolExecutionResult] | None = None
+
+
+
+ChatEntry = ChatRequest | ChatResponse | ChatRequestWithTools | ChatResponseWithTools

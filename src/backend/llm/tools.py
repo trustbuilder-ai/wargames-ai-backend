@@ -86,6 +86,17 @@ class ToolRegistry:
         """
         return list(self._tools.keys())
 
+    def has_tool(self, name: str) -> bool:
+        """Check if a tool is registered.
+
+        Args:
+            name: Tool name to check.
+
+        Returns:
+            True if the tool is registered, False otherwise.
+        """
+        return name in self._tools
+
     async def execute_tool(
         self,
         tool_name: str,
@@ -229,6 +240,7 @@ class ToolRegistry:
         Args:
             tools_config: Dictionary of tool configurations from YAML.
         """
+        print(f"Loading tools from config: {tools_config}")
         for tool_name, tool_data in tools_config.items():
             self.register_tool(
                 name=tool_name,

@@ -55,7 +55,7 @@ class LLMAgent:
     async def chat_with_tools(
         self,
         request: ChatRequestWithTools,
-        mock_mode: bool = False,
+        mock_mode: bool = True,
         auto_execute_tools: bool = True,
     ) -> list[ChatResponseWithTools|ChatMessageWithTools]:
         """Execute a chat completion with tool calling support.

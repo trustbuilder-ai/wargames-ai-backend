@@ -4,13 +4,13 @@ import os
 import time
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlmodel import Session, and_, or_, select
+from sqlmodel import Session, and_, select
 from supabase import Client, create_client
 
 from backend.database.connection import get_db
@@ -27,9 +27,12 @@ from backend.db_api import ensure_user_exists, get_user_info
 import backend.db_api as db_api
 from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
+from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL
 from backend.models.llm import (
     ChatRequest,
+    ChatRequestWithTools,
     ChatResponse,
+    ChatResponseWithTools,
     LLMHealthStatus,
     ModelsResponse,
 )
@@ -175,7 +178,6 @@ async def get_current_user(
         "aud": decoded_token.get("aud"),
         "exp": decoded_token.get("exp"),
     }
-
     return user
 
 
@@ -190,9 +192,6 @@ async def get_current_user_full(
     user_data = auth_handler.verify_token(token)
 
     return user_data
-
-
-#### START STUBBED CODE
 
 
 @app.get("/tournaments", response_model=list[Tournaments])
@@ -308,13 +307,15 @@ async def start_challenge(
 
 # Route for submitting a message to a challenge agent
 @app.post(
-    "/challenges/{challenge_id}/submit_message",
+    "/challenges/{challenge_id}/add_message",
     response_model=ChallengeContextResponse,
 )
-async def submit_message_to_challenge(
+async def add_message_to_challenge(
     challenge_id: int,
     message: str,
+    role: Literal["user", "assistant", "system"] = "user",
     current_user: dict[str, Any] = Depends(get_current_user),
+    solicit_llm_response: bool = True,
     db: Session = Depends(get_db),
 ):
     """Submit a message to the challenge agent"""
@@ -323,9 +324,14 @@ async def submit_message_to_challenge(
             session=db,
             user_id=current_user["id"],
             challenge_id=challenge_id,
+            model=DEFAULT_CHAT_COMPLETION_MODEL,
             message=message,
+            role=role,
         )
-
+        if solicit_llm_response:
+            # Optionally trigger LLM response generation
+            # This could be an async task or direct call depending on your architecture
+            
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
     except ValueError as e:

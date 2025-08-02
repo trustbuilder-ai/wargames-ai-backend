@@ -133,6 +133,7 @@ class ChallengeEvaluations(SQLModel, table=True):
     result_text: Optional[str] = Field(default=None, sa_column=Column('result_text', Text))
     result_type: Optional[str] = Field(default=None, sa_column=Column('result_type', String))
     user_challenge_context_id: Optional[int] = Field(default=None, sa_column=Column('user_challenge_context_id', Integer))
+    processed_at: Optional[datetime] = Field(default=None, sa_column=Column('processed_at', DateTime(True)))
 
     user_challenge_context: Optional['UserChallengeContexts'] = Relationship(back_populates='challenge_evaluations')
 

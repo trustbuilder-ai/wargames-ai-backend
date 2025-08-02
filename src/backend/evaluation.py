@@ -1,6 +1,12 @@
-from sqlmodel import Session
+from typing import Any, Optional
+from datetime import datetime, timezone
 
-from backend.database.models import ChallengeEvaluations
+from sqlmodel import Session, select
+
+from backend.database.locking import Locker
+from backend.database.models import ChallengeEvaluations, Challenges, UserChallengeContexts
+from backend.exceptions import NotFoundError
+from backend.models.evaluation import EvalResult, EvalStatus
 
 """
 ADD TO MESSAGE TABLE
@@ -36,25 +42,29 @@ can_contribute = False
 """
 
 
-
 def _set_challenge_context_processed(session: Session, challenge_context_id: int):
-
-
-    evaluation: ChallengeEvaluations = session.exec(select(ChallengeEvaluations).where(     
-        challenge_context_id=challenge_context_id)).first()
+    """
+    Set the challenge context as processed and update the evaluation status.
+    This function should be called within a lock to prevent race conditions.
+    """
+    # Reload the evaluation to ensure we have the latest state
+    evaluation: Optional[ChallengeEvaluations] = session.exec(select(ChallengeEvaluations).where(
+            challenge_context_id == challenge_context_id)).first()
+    assert evaluation, "Evaluation must exist for challenge context"
     if evaluation.processed_at is not None:
         raise ValueError("Evaluation race condition")
-    evaluation.processed_at = int(time.time())
+    evaluation.processed_at = datetime.now(timezone.utc)
 
-    challenge_context: ChallengeContexts = session.select(ChallengeContexts).filter(     
-        id=challenge_context_id).first()
+    challenge_context: Optional[UserChallengeContexts] = session.exec(select(UserChallengeContexts).where(
+        UserChallengeContexts.id == challenge_context_id)).first()
 
-    assert challenge_context, "Challenge must exist for evaluation. DB schema error?""
+    assert challenge_context, "Challenge must exist for evaluation. DB schema error?"
     challenge_context.can_contribute = False
 
     session.add(evaluation)
     session.add(challenge_context)
     session.commit()
+    return challenge_context
 
 
 def get_raw_message_instance(content: str, content_type: str) -> Any:
@@ -66,10 +76,11 @@ def format_as_messages(content: str, content_type: str) -> list[Message]:
 
 
 def get_evaluation_result(
-        session: Session, challenge_context: ChallengeUserContexts) -> EvalResult:
+        session: Session, challenge_context: UserChallengeContexts) -> EvalResult:
     # This challenge context does not have the messages in a user-available format by
     # default
-    challenge: Challenges = challenge_context.challenges
+    challenge: Optional[Challenges] = challenge_context.challenge
+    assert challenge, "Challenge must exist for evaluation."
     if challenge:
         get_tool_calls()
     if tool_call without prompt evaluation, then:
@@ -78,34 +89,42 @@ def get_evaluation_result(
     if tool_call and prompt evaluation, then:
         check if the tool was called, and then evaluate the context
 
-    pass
+    return EvalResult(
+        result_raw=None,
+        result_type=None,
+        result_text="Evaluation not implemented yet",
+        status=EvalStatus.NOT_EVALUATED
+    )
 
 
 def evaluate_challenge_context(session: Session, challenge_context_id: int):
-    evaluation: Evaluation = session.select(ChallengeContextEvaluation).filter(     
-            challenge_context_id=challenge_context_id).first()
-
+    evaluation: Optional[ChallengeEvaluations] = session.exec(select(ChallengeEvaluations).where(     
+            challenge_context_id==challenge_context_id)).first()
+    if not evaluation:
+        raise NotFoundError("Evaluation not found")
     if evaluation.processed_at is None:
         raise NotFoundError("Evaluation not found")
 
-    with Locker().acquire_lock(challenge_context_id):
-        challenge_context: ChallengeUserContexts = _set_challenge_context_processed(session, challenge_context_id)
+    with Locker(session).acquire_lock(str(challenge_context_id)):
+        challenge_context: UserChallengeContexts = _set_challenge_context_processed(session, challenge_context_id)
 
     # Format the challenge context for evaluation.
     result_text: str = "not processed"
     result: Optional[str] = None
 
-    now = int(time.time())
+    now = datetime.now(timezone.utc)
 
     try:
-        eval_result: EvalResult = evaluate_challenge_context(session, challenge_context)
-        assert eval_result in [eval_status.SUCCEEDED, eval_status.FAILED, \
-                eval_status.ERRORED]
-        if eval_result.status == eval_status.SUCCEEDED:
+        eval_result: EvalResult = get_evaluation_result(
+            session, challenge_context
+        )
+        assert eval_result in [EvalStatus.SUCCEEDED, EvalStatus.FAILED, \
+                EvalStatus.ERRORED]
+        if eval_result.status == EvalStatus.SUCCEEDED:
             evaluation.succeeded_at = now
-        elif eval_result.status == eval_status.FAILED:
+        elif eval_result.status == EvalStatus.FAILED:
             evaluation.failed_at = now
-        elif eval_result.status == eval_status.ERRORED:
+        elif eval_result.status == EvalStatus.ERRORED:
             evaluation.errored_at = now
     except Exception as e:
         evaluation.errored_at = now

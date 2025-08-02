@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 from functools import cache
-from typing import Iterable
+from typing import Iterable, Literal
 
 from sqlmodel import Session, and_, select
 
@@ -15,6 +15,7 @@ from backend.database.models import (
     UserTournamentEnrollments,
 )
 from backend.exceptions import NotFoundError
+from backend.models.llm import ChatMessage, ChatMessageWithTools, ChatRequest, ChatResponse, ChatResponseWithTools
 from backend.models.supplemental import ChallengeContextResponse, Message, SelectionFilter, UserInfo
 
 
@@ -80,8 +81,8 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
     )
 
 def add_message_to_challenge(
-    session: Session, user_id: int, challenge_id: int, message: str, role: str = "user"
-):
+    session: Session, user_id: int, challenge_id: int, model: str, message: str, role: Literal["user", "assistant", "system"] = "user"
+) -> UserChallengeContextMessages:
     # Add message if it can be added to the context. It will be followed up by a processed
     # at message.
     user_challenge_context = session.exec(
@@ -101,17 +102,59 @@ def add_message_to_challenge(
     if not user_challenge_context_id:
         raise NotFoundError("User challenge context not found")
 
+    chat_request: ChatRequest = ChatRequest(
+        model=model,
+        messages=[
+            ChatMessage(
+                role=role,
+                content=message
+            )
+        ]
+    )
+
     context_message: UserChallengeContextMessages = UserChallengeContextMessages(
         user_challenge_context_id=user_challenge_context_id,
-        content=message,
+        content= chat_request.model_dump_json(),
         created_at=datetime.now(UTC),
-        content_type="str",
+        content_type= chat_request.__class__.__name__,
+        model=model,
         role=role,
         is_user_provided=True,
     )
     session.add(context_message)
     session.commit()
-    return user_challenge_context
+    return context_message
+
+
+def add_chat_entries_to_challenge_no_checks(
+    session: Session,
+    user_challenge_context_id: int,
+    chat_entries: list[ChatResponseWithTools|ChatMessageWithTools|ChatResponse],
+):
+    """
+    Bulk add messages to a challenge context without checks.
+    This assumes that the caller has already called add_message_to_challenge
+    or similar to ensure the context exists and is valid.
+    """
+    for chat_entry in chat_entries:
+        if not isinstance(chat_entry, (ChatResponseWithTools, ChatMessageWithTools, ChatResponse)): # type: ignore[reportUnnecessaryIsInstance]
+            raise ValueError("Messages must be ChatResponseWithTools or ChatMessageWithTools")
+        if isinstance(chat_entry, (ChatResponse, ChatResponseWithTools)):
+            role: str = "assistant"
+        elif isinstance(chat_entry, ChatMessageWithTools): # type: ignore[reportUnnecessaryIsInstance]
+            role = chat_entry.role
+        else:
+            raise ValueError(f"Invalid chat entry type: {type(chat_entry)}")
+        context_message: UserChallengeContextMessages = UserChallengeContextMessages(
+            user_challenge_context_id=user_challenge_context_id,
+            content=chat_entry.model_dump_json(),
+            created_at=datetime.now(UTC),
+            content_type=chat_entry.__class__.__name__,
+            role=role,
+            is_user_provided=True,
+        )
+        session.add(context_message)
+    session.commit()
 
 
 def get_challenge_context_response(
@@ -294,3 +337,27 @@ def list_challenges(
     statement = statement.offset(page_index * count).limit(count)
     challenges = session.exec(statement).all()
     return challenges
+
+
+def load_challenge_context_messages(
+    session: Session, user_challenge_context_id: int
+) -> Iterable[ChatRequest|ChatResponse|ChatMessageWithTools|ChatResponseWithTools]:
+    """
+    Load all messages for a given user challenge context.
+    Returns a list of UserChallengeContextMessages.
+    """
+    messages: Iterable[UserChallengeContextMessages] = session.exec(
+        select(UserChallengeContextMessages).where(
+            UserChallengeContextMessages.user_challenge_context_id == user_challenge_context_id
+        )
+    ).all()
+    messages = sorted(messages, key=lambda m: m.created_at)
+    for message in messages:
+        if message.content_type == "ChatRequest":
+            yield ChatRequest.model_validate_json(message.content)
+        elif message.content_type == "ChatResponseWithTools":
+            yield ChatResponseWithTools.model_validate_json(message.content)
+        elif message.content_type == "ChatMessageWithTools":
+            yield ChatMessageWithTools.model_validate_json(message.content)
+        else:
+            yield ChatResponse.model_validate_json(message.content)
