@@ -150,24 +150,27 @@ def get_evaluation_result(
     challenge: Optional[Challenges] = challenge_context.challenge
     assert challenge, "Challenge must exist for evaluation."
     assert challenge.id, "Challenge must have an ID for evaluation."
-    #tools: list[str] = json.loads(challenge.tool_calls) if challenge.tool_calls else []
 
     status: EvalStatus = EvalStatus.NOT_EVALUATED
-    reason: str = ""
+    reason: str = "Unknown"
     required_tool_calls: Optional[list[str]] =  db_api.get_challenge_tools(session, challenge.id)
+    if not challenge.evaluation_prompt and not required_tool_calls:
+        raise ValueError("Invalid challenge specification. Must have one of or both of evaluation_prompt and required tools.")
     if required_tool_calls:
         if set(required_tool_calls) - set(get_called_tools(challenge_context)):
             status = EvalStatus.FAILED
             reason = "Not all tools called"
+        else:
+            status = EvalStatus.SUCCEEDED
+            reason = "All tools called."
 
-    if challenge.evaluation_prompt:
+    if challenge.evaluation_prompt and challenge.evaluation_prompt.strip() and status != EvalStatus.FAILED:
         messages: list[Message] =  list(map_chat_entries_to_messages(
             list(db_api._instantiate_challenge_context_messages(list( # type: ignore
                 challenge_context.user_challenge_context_messages)))))
-        evaluation_result = get_raw_llm_evaluation(challenge.evaluation_prompt, messages)
+        evaluation_result: dict[str, str|int] = get_raw_llm_evaluation(challenge.evaluation_prompt, messages)
         if evaluation_result["success"]:
             status = EvalStatus.SUCCEEDED
-            
         else:
             status = EvalStatus.FAILED
         reason = evaluation_result["reason"] # type: ignore
@@ -176,6 +179,7 @@ def get_evaluation_result(
         reason=reason,
         status=status
     )
+
 
 def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
     """
@@ -190,9 +194,8 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
         )
     )
 
-# CALL evaluate challenge context manually after invoking it.
 
-def evaluate_challenge_context(session: Session, challenge_context_id: int) -> EvalResult
+def evaluate_challenge_context(session: Session, challenge_context_id: int) -> EvalResult:
     evaluation: Optional[ChallengeEvaluations] = session.exec(select(ChallengeEvaluations).where(     
             challenge_context_id==challenge_context_id)).first()
     if not evaluation:
@@ -229,3 +232,5 @@ def evaluate_challenge_context(session: Session, challenge_context_id: int) -> E
         evaluation.result_text = result_text
         session.add(evaluation)
         session.commit()
+
+    return format_eval_result(evaluation)
