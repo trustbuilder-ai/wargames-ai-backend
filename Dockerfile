@@ -31,7 +31,7 @@ LABEL org.opencontainers.image.vendor="TrustBuilder"
 # LABEL org.opencontainers.image.licenses="MIT"
 
 ARG PORT="8080"
-ARG HOST="127.0.0.1"
+ARG HOST="0.0.0.0"
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PORT=${PORT}
 
@@ -52,4 +52,6 @@ EXPOSE ${PORT}
 
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://${HOST}:${PORT}/health_check || exit 1
-CMD ["python", "-m", "uvicorn", "backend.server:app", "--host", "${HOST}", "--port", "${PORT}"]
+CMD ["sh", "-c", "python -m uvicorn backend.server:app --host ${HOST:-0.0.0.0} --port ${PORT:-8080}"]
+
+
