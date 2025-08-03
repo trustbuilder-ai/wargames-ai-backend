@@ -1,6 +1,5 @@
 # A shim file to provide boiler plate for LLM-related functionality.
 
-
 import json
 from typing import Iterable, Literal, Optional
 from backend.llm.agent import LLMAgent
@@ -16,19 +15,21 @@ DEFAULT_CHAT_COMPLETION_MODEL: str = "gpt-4o-mini"
 def map_chat_entries_to_messages(chat_entries: list[ChatEntry]) -> Iterable[Message]:
     for chat_entry in chat_entries:
         if isinstance(chat_entry, ChatMessageWithTools):
+            tool_call_id = chat_entry.tool_call_id if chat_entry.tool_call_id else None
             if chat_entry.tool_calls is None:
                 yield Message(
                     role=chat_entry.role,
                     content=chat_entry.content,
+                    tool_call_id=tool_call_id
                 )
             else:
-                for tool_call in chat_entry.tool_calls:
-                    yield Message(
-                        role=chat_entry.role,
-                        content=json.dumps(tool_call.function.arguments),
-                        is_tool_call=True,
-                        tool_name=tool_call.function.name
-                    )
+                yield Message(
+                    role=chat_entry.role,
+                    content=json.dumps([tool_call.function.arguments for tool_call in chat_entry.tool_calls]),
+                    is_tool_call=True,
+                    tool_calls = chat_entry.tool_calls,
+                    #tool_call_id=chat_entry.tool_calls[0].id if chat_entry.tool_calls else None
+                )
         elif isinstance(chat_entry, ChatResponseWithTools):
             if chat_entry.choices[0].message.tool_calls is None:
                 yield Message(
@@ -36,13 +37,13 @@ def map_chat_entries_to_messages(chat_entries: list[ChatEntry]) -> Iterable[Mess
                     content=chat_entry.choices[0].message.content,
                 )
             else:
-                for tool_call in chat_entry.choices[0].message.tool_calls:
-                    yield Message(
-                        role=chat_entry.choices[0].message.role,
-                        content=json.dumps(tool_call.function.arguments),
-                        is_tool_call=False,
-                        tool_name=tool_call.function.name
-                    )
+                yield Message(
+                    role=chat_entry.choices[0].message.role,
+                    content="",
+                    is_tool_call=False,
+                    tool_calls=chat_entry.choices[0].message.tool_calls,
+                    tool_call_id=chat_entry.choices[0].message.tool_call_id
+                )
         elif isinstance(chat_entry, ChatMessage):
             yield Message(
                 role=chat_entry.role,
@@ -77,40 +78,65 @@ def map_chat_response(item: ChatEntry) -> ChatMessage:
     )
 
 
-async def send_shim_request(message: str,
+def map_message_to_chat_message(message: Message) -> ChatMessage:
+    """
+    Maps a Message object to a ChatMessage object.
+    """
+    return ChatMessage(
+        role=message.role, # type: ignore
+        content=message.content,
+    )
+
+
+def map_message_to_chat_message_with_tools(message: Message) -> ChatMessageWithTools:
+    """
+    Maps a Message object to a ChatMessageWithTools object.
+    """
+    return ChatMessageWithTools(
+        role=message.role, # type: ignore
+        content=message.content,
+        tool_calls=message.tool_calls,
+        tool_call_id=message.tool_call_id
+    )
+
+
+async def send_shim_request(message: str, context: Optional[list[Message]] = None,
                             role: Literal["user", "assistant", "system"] = "user") -> ChatResponse:
     """
     This is a wrapper around the more complex functions to provide a standard interface.
     The raw data types are stored in the db.
     """
     client: LLMClient = LLMClient()
+    messages: list[ChatMessage] = [ChatMessage(
+        role=role,
+        content=message
+    )]
+    if context:
+        messages.extend(map_message_to_chat_message(m) for m in context)
     chat_request: ChatRequest = ChatRequest(
        model=DEFAULT_CHAT_COMPLETION_MODEL,
-       messages = [
-            ChatMessage(
-                role=role,
-                content=message
-            ),
-       ]
+       messages=messages
     )
     return await client.chat_completion(chat_request)
 
 
-async def send_shim_request_with_tools(message: str, tools: list[str],
-                                       role: Literal["user", "assistant", "system"] = "user") -> list[ChatResponseWithTools|ChatMessageWithTools]:
+async def send_shim_request_with_tools(message: str, tools: list[str], context: Optional[list[Message]] = None,
+                                       role: Literal["user", "assistant", "system"] = "user", )  -> list[ChatResponseWithTools|ChatMessageWithTools]:
     tool_registry: Optional[ToolRegistry] = llm_config.get_tool_registry(allowed_tools=tools)
-    assert tool_registry is not None, "Tool registry must be initialized in LLMConfig"
+    assert tool_registry is not None, "Tool registry must e initialized in LLMConfig"
     client: LLMClient = LLMClient()
+
+    messages: list[ChatMessageWithTools] = [ChatMessageWithTools(
+        role=role,
+        content=message
+    )]
+    if context:
+        messages.extend(map_message_to_chat_message_with_tools(m) for m in context)
     agent: LLMAgent = LLMAgent(client, tool_registry, max_iterations = 2)
     response: list[ChatResponseWithTools|ChatMessageWithTools] = await agent.chat_with_tools(
         ChatRequestWithTools(
             model=DEFAULT_CHAT_COMPLETION_MODEL,
-            messages = [
-                ChatMessageWithTools(
-                    role = role,
-                    content = message
-                )
-            ],
+            messages=messages,
         )
     )
     return response  # type: ignore

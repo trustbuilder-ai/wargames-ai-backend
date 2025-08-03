@@ -15,6 +15,8 @@ from backend.database.models import (
     Users,
     UserTournamentEnrollments,
 )
+from backend.util.log import logger
+
 from backend.exceptions import NotFoundError
 from backend.llm.shim import map_chat_entries_to_messages
 from backend.models.llm import ChatEntry, ChatMessageWithTools, ChatRequest, ChatResponse, ChatResponseWithTools
@@ -355,7 +357,7 @@ def _instantiate_challenge_context_messages(
 
 def load_challenge_context_messages(
     session: Session, user_challenge_context_id: int
-) -> Iterable[ChatRequest|ChatResponse|ChatMessageWithTools|ChatResponseWithTools]:
+) -> Iterable[Message]:
     """
     Load all messages for a given user challenge context.
     Returns a list of UserChallengeContextMessages.
@@ -365,7 +367,10 @@ def load_challenge_context_messages(
             UserChallengeContextMessages.user_challenge_context_id == user_challenge_context_id
         )
     ).all()
-    return _instantiate_challenge_context_messages(messages)
+    logger.info(
+        f"Loading {len(messages)} messages for user challenge context {user_challenge_context_id}"
+    )
+    return map_chat_entries_to_messages(list(_instantiate_challenge_context_messages(messages)))
 
 
 def get_challenge_tools(

@@ -322,6 +322,7 @@ async def add_message_to_challenge(
     """Submit a message to the challenge agent"""
     try:
         user: Users = ensure_user_exists(db, current_user["id"])
+
         user_challenge_context_id: int = db_api.add_message_to_challenge(
             session=db,
             user_id=user.id,
@@ -330,6 +331,12 @@ async def add_message_to_challenge(
             message=message,
             role=role,
         )
+        context_messages: list[Message] = list(db_api.load_challenge_context_messages(
+            session=db,
+            user_challenge_context_id=user_challenge_context_id,
+        ))
+        logger.info(f"Number of context messages loaded: {len(context_messages)}")
+
         if solicit_llm_response:
             # XXXXXX TODO: add LLM contexts.
             # Optionally trigger LLM response generation
@@ -342,12 +349,14 @@ async def add_message_to_challenge(
                 chat_entry_list.extend(await send_shim_request_with_tools(
                     message=message,
                     tools=challenge_tools,
+                    context=context_messages,
                     role=role,
                 ))
             else:
                 chat_entry_list.append(
                     await send_shim_request(
-                        message=message, role=role
+                        message=message, role=role,
+                        context=context_messages
                     )
                 )
             add_chat_entries_to_challenge_no_checks(

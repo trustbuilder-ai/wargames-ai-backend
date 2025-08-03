@@ -351,11 +351,11 @@
         }
       }
     },
-    "/challenges/{challenge_id}/submit_message": {
+    "/challenges/{challenge_id}/add_message": {
       "post": {
-        "summary": "Submit Message To Challenge",
+        "summary": "Add Message To Challenge",
         "description": "Submit a message to the challenge agent",
-        "operationId": "submit_message_to_challenge_challenges__challenge_id__submit_message_post",
+        "operationId": "add_message_to_challenge_challenges__challenge_id__add_message_post",
         "security": [
           {
             "HTTPBearer": []
@@ -378,6 +378,31 @@
             "schema": {
               "type": "string",
               "title": "Message"
+            }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "user",
+                "assistant",
+                "system"
+              ],
+              "type": "string",
+              "default": "user",
+              "title": "Role"
+            }
+          },
+          {
+            "name": "solicit_llm_response",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Solicit Llm Response"
             }
           }
         ],
@@ -722,7 +747,7 @@
             ],
             "title": "Description"
           },
-          "tools_available": {
+          "required_tools": {
             "anyOf": [
               {
                 "type": "string"
@@ -731,9 +756,9 @@
                 "type": "null"
               }
             ],
-            "title": "Tools Available"
+            "title": "Required Tools"
           },
-          "tool_calls_success_criteria": {
+          "evaluation_prompt": {
             "anyOf": [
               {
                 "type": "string"
@@ -742,7 +767,7 @@
                 "type": "null"
               }
             ],
-            "title": "Tool Calls Success Criteria"
+            "title": "Evaluation Prompt"
           }
         },
         "type": "object",
@@ -1228,30 +1253,6 @@
           "user_id": {
             "type": "integer",
             "title": "User Id"
-          },
-          "succeeded_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Succeeded At"
-          },
-          "failed_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failed At"
           }
         },
         "type": "object",

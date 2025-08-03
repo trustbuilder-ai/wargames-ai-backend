@@ -1,3 +1,5 @@
+from json import tool
+from typing import Optional
 from pydantic import BaseModel
 from strenum import StrEnum
 
@@ -7,6 +9,7 @@ from backend.database.models import (
     Tournaments,
     UserChallengeContexts,
 )
+from backend.models.llm import ToolCall
 
 
 class UserInfo(BaseModel):
@@ -31,6 +34,8 @@ class Message(BaseModel):
     content: str
     is_tool_call: bool = False
     tool_name: str | None = None
+    tool_calls: Optional[list[ToolCall]] = None
+    tool_call_id: str | None = None
 
 
 class ChallengeContextResponse(BaseModel):
