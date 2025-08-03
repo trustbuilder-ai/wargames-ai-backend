@@ -65,3 +65,58 @@ defaults:
   temperature: 0.7
   max_tokens: 4096
   default_model: "gpt-4o-mini"
+
+# Tool definitions for agentic capabilities
+tools:
+  # Mock tools for development/testing
+  spy_drone:
+    type: mock
+    description: "Send a spy drone to a location."
+    parameters:
+      type: object
+      properties:
+        expression:
+          type: string
+          description: "The lat lon as a geohash, e.g. '9q9z4'"
+      required: ["expression"]
+    mock_response: "42"  # Always returns 42 for testing
+
+  weather:
+    type: mock
+    description: "Get current weather for a location"
+    parameters:
+      type: object
+      properties:
+        location:
+          type: string
+          description: "The city and state, e.g. San Francisco, CA"
+      required: ["location"]
+    mock_response:
+      temperature: 72
+      condition: "sunny"
+      humidity: 45
+
+  search:
+    type: mock
+    description: "Search for information on the internet"
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: "The search query"
+      required: ["query"]
+    mock_response: "Here are some search results for your query..."
+
+  # Example of a real tool (would need implementation)
+  # database_query:
+  #   type: function
+  #   description: "Query the wargames database"
+  #   handler: "backend.tools.database.query_handler"
+  #   parameters:
+  #     type: object
+  #     properties:
+  #       query:
+  #         type: string
+  #         description: "SQL query to execute"
+  #     required: ["query"]

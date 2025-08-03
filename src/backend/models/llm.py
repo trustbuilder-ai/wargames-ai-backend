@@ -4,7 +4,7 @@ This module defines the data models used for LLM API requests and responses,
 following the OpenAI ChatCompletions API format for consistency.
 """
 
-from typing import Any, Literal
+from typing import Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
@@ -167,3 +167,128 @@ class ErrorResponse(BaseModel):
     """
 
     error: ErrorDetail
+
+
+# ============================================================================
+# Tool-related models for agentic capabilities
+# ============================================================================
+
+
+class ToolFunction(BaseModel):
+    """Function definition for tool calling.
+
+    Attributes:
+        name: The name of the function to be called.
+        description: Description of what the function does.
+        parameters: JSON Schema for the function parameters.
+    """
+
+    name: str
+    description: str
+    parameters: dict[str, Any] = Field(
+        default_factory=lambda: {"type": "object", "properties": {}}
+    )
+
+
+class FunctionCall(BaseModel):
+    """Function call details within a tool call.
+
+    Attributes:
+        name: The name of the function to call.
+        arguments: The arguments to call the function with (as JSON string).
+    """
+
+    name: str
+    arguments: str  # JSON string of arguments
+
+
+class ToolCall(BaseModel):
+    """A tool call request from the model.
+
+    Attributes:
+        id: Unique identifier for this tool call.
+        type: The type of tool call (currently only 'function').
+        function: The function call details.
+    """
+
+    id: str
+    type: Literal["function"] = "function"
+    function: FunctionCall
+
+
+class ChatMessageWithTools(ChatMessage):
+    """Extended chat message that can include tool calls.
+
+    Attributes:
+        tool_calls: List of tool calls requested by the assistant.
+        tool_call_id: ID of the tool call this message is responding to.
+    """
+
+    role: Literal["user", "assistant", "system", "tool"] # type: ignore
+    tool_calls: list[ToolCall] | None = None
+    tool_call_id: str | None = None
+
+
+class ChatRequestWithTools(ChatRequest):
+    """Extended chat request that can include tool definitions.
+
+    Attributes:
+        tools: List of available tools for the model to use.
+        tool_choice: How the model should choose tools ('auto', 'none', or specific).
+    """
+
+    messages: list[ChatMessageWithTools] # type: ignore
+    tools: list[ToolFunction] | None = None
+    tool_choice: Union[Literal["auto", "none"], dict[str, str]] | None = None
+
+
+class ChatChoiceWithTools(ChatChoice):
+    """Extended chat choice that can include tool calls.
+
+    Attributes:
+        message: The message with potential tool calls.
+    """
+
+    message: ChatMessageWithTools # type: ignore
+
+
+class ChatResponseWithTools(ChatResponse):
+    """Extended chat response that can include tool calls.
+
+    Attributes:
+        choices: List of completion choices with tool support.
+    """
+
+    choices: list[ChatChoiceWithTools] # type: ignore
+
+
+class ToolExecutionResult(BaseModel):
+    """Result from executing a tool.
+
+    Attributes:
+        tool_call_id: ID of the tool call this is responding to.
+        output: The output from the tool execution.
+        error: Error message if the tool execution failed.
+    """
+
+    tool_call_id: str
+    output: str | None = None
+    error: str | None = None
+
+
+class ConversationTurn(BaseModel):
+    """A single turn in a tool-calling conversation.
+
+    Attributes:
+        request: The request sent to the LLM.
+        response: The response from the LLM.
+        tool_results: Results from any tool executions.
+    """
+
+    request: ChatRequestWithTools
+    response: ChatResponseWithTools
+    tool_results: list[ToolExecutionResult] | None = None
+
+
+
+ChatEntry = ChatMessage | ChatResponse | ChatMessageWithTools | ChatResponseWithTools
