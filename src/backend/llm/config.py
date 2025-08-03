@@ -39,6 +39,7 @@ class LLMConfig:
         self.default_max_tokens = 4096
         self.default_model = "gpt-4o-mini"
         self._config: dict[str, Any] = self._load_config(config_path)
+        self._initialize_config(self._config)
 
     def _load_config(self, config_path: str|Path) -> dict[str, Any]:
         """Load configuration from YAML file."""

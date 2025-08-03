@@ -7,6 +7,7 @@ from sqlmodel import Session, and_, select
 
 from backend.database.models import (
     Badges,
+    ChallengeEvaluations,
     Challenges,
     Tournaments,
     UserBadges,
@@ -15,6 +16,7 @@ from backend.database.models import (
     Users,
     UserTournamentEnrollments,
 )
+from backend.models.evaluation import EvalStatus
 from backend.util.log import logger
 
 from backend.exceptions import NotFoundError
@@ -222,7 +224,13 @@ def start_challenge(
         can_contribute=True,
     )
 
+    evaluation: ChallengeEvaluations = ChallengeEvaluations(
+        user_challenge_context_id=context.id,
+        created_at=datetime.now(UTC),
+    )
+
     session.add(context)
+    session.add(evaluation)
     session.commit()
     session.refresh(context)
 

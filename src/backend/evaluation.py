@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Any, Optional
+from typing import Optional
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
@@ -14,9 +14,10 @@ from backend.llm.shim import map_chat_entries_to_messages
 from backend.models.evaluation import EvalResult, EvalStatus
 from backend.models.llm import ChatMessage, ChatRequest, ChatResponse
 from backend.models.supplemental import Message
+from backend.llm.config import llm_config # type: ignore
 
 
-DEFAULT_EVALUATION_MODEL: str = "gpt-4.1"
+DEFAULT_EVALUATION_MODEL: str = "gpt-4o"
 EVALUATION_SYSTEM_PROMPT: str = \
     """
 You are an expert at assessing a user and LLM conversation with respect to provided criteria.
@@ -44,6 +45,9 @@ formatting.
 The "success" field should be 1 if the user has successfully fulfilled the criteria, and 0 otherwise.
 The "reason" field should provide a clear explanation of the evaluation result, including any relevant
 details about the user's performance.
+
+DO NOT USE BACKTIC OPERATORS OR DECLARE THE RESPONSE TYPE AS JSON. The output must be a valid JSON object
+with the specified fields.
 """
 
 EVALUATION_USER_PROMPT: str = """\
@@ -163,8 +167,8 @@ def get_evaluation_result(
         else:
             status = EvalStatus.SUCCEEDED
             reason = "All tools called."
-
-    if challenge.evaluation_prompt and challenge.evaluation_prompt.strip() and status != EvalStatus.FAILED:
+    
+    if challenge.evaluation_prompt and challenge.evaluation_prompt.strip() and status not in [EvalStatus.FAILED, EvalStatus.NOT_EVALUATED]:
         messages: list[Message] =  list(map_chat_entries_to_messages(
             list(db_api._instantiate_challenge_context_messages(list( # type: ignore
                 challenge_context.user_challenge_context_messages)))))
@@ -216,7 +220,8 @@ def evaluate_challenge_context(session: Session, challenge_context_id: int) -> E
         eval_result: EvalResult = get_evaluation_result(
             session, challenge_context
         )
-        assert eval_result in [EvalStatus.SUCCEEDED, EvalStatus.FAILED, \
+        result_text = eval_result.reason or "Unknown reason"
+        assert eval_result.status in [EvalStatus.SUCCEEDED, EvalStatus.FAILED, \
                 EvalStatus.ERRORED]
         if eval_result.status == EvalStatus.SUCCEEDED:
             evaluation.succeeded_at = now
