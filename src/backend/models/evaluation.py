@@ -13,8 +13,6 @@ class EvalStatus(StrEnum):
 class EvalResult(BaseModel):
     # this is what's sent to the user and wrapped in the openai
     # evaluation.
-    result_raw: Optional[str] = None
-    result_type: Optional[str] = None
-    result_text: Optional[str] = None
+    reason: Optional[str] = None
     status: EvalStatus
 
