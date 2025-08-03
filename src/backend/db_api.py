@@ -16,7 +16,6 @@ from backend.database.models import (
     Users,
     UserTournamentEnrollments,
 )
-from backend.models.evaluation import EvalStatus
 from backend.util.log import logger
 
 from backend.exceptions import NotFoundError
@@ -89,6 +88,9 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
 def add_message_to_challenge(
     session: Session, user_id: int, challenge_id: int, model: str, message: str, role: Literal["user", "assistant", "system"] = "user"
 ) -> int:
+    """
+    Add a message to the challenge context.
+    """
     # Add message if it can be added to the context. It will be followed up by a processed
     # at message.
     user_challenge_context = session.exec(
@@ -348,6 +350,20 @@ def list_challenges(
 def _instantiate_challenge_context_messages(
         challenge_context_messages: Iterable[UserChallengeContextMessages]
 ) -> Iterable[ChatEntry]:
+    """Instantiate chat entries from user challenge context messages.
+
+    Args:
+        challenge_context_messages (Iterable[UserChallengeContextMessages]): The user challenge context messages to instantiate.
+
+    Raises:
+        ValueError: If the content type of the message is unknown.
+
+    Returns:
+        Iterable[ChatEntry]: Yields chat entries based on the content type of the messages.
+
+    Yields:
+        Iterator[Iterable[ChatEntry]]: An iterator that yields chat entries based on the content type of the messages.
+    """
     challenge_context_messages = sorted(challenge_context_messages, key=lambda m: m.created_at)
     for message in challenge_context_messages:
         if message.content_type == "ChatRequest":

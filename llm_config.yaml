@@ -69,9 +69,9 @@ defaults:
 # Tool definitions for agentic capabilities
 tools:
   # Mock tools for development/testing
-  nuclear_test:
+  spy_drone:
     type: mock
-    description: "Launch a nuclear weapon test in a safe area."
+    description: "Send a spy drone to a location."
     parameters:
       type: object
       properties:

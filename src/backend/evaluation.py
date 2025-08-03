@@ -1,3 +1,9 @@
+"""
+This module contains functions for evaluating challenge contexts in the backend.
+It includes functions to get the evaluation result from the LLM, format the evaluation result,
+and evaluate a challenge context based on the messages and criteria provided.
+"""
+
 import asyncio
 import json
 from typing import Optional
@@ -147,7 +153,7 @@ def get_called_tools(
     return list(called_tool_names)
 
 
-def get_evaluation_result(
+def _get_evaluation_result(
         session: Session, challenge_context: UserChallengeContexts) -> EvalResult:
     # This challenge context does not have the messages in a user-available format by
     # default
@@ -190,7 +196,7 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
     Format the evaluation result into a standard EvalResult object.
     """
     return EvalResult(
-        reason=evaluation.result_text,
+        reason=evaluation.result_text or "No result text",
         status=EvalStatus.SUCCEEDED if evaluation.succeeded_at else (
             EvalStatus.FAILED if evaluation.failed_at else (
                 EvalStatus.ERRORED if evaluation.errored_at else EvalStatus.NOT_EVALUATED
@@ -200,8 +206,13 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
 
 
 def evaluate_challenge_context(session: Session, challenge_context_id: int) -> EvalResult:
-    evaluation: Optional[ChallengeEvaluations] = session.exec(select(ChallengeEvaluations).where(     
-            challenge_context_id==challenge_context_id)).first()
+    """
+    Evaluate a challenge context by processing its messages and criteria.
+    This function retrieves the challenge context, checks if it has been processed,
+    and if not, processes it to get the evaluation result.
+    """
+    evaluation: Optional[ChallengeEvaluations] = session.exec(select(ChallengeEvaluations).where(
+            challenge_context_id == challenge_context_id)).first()
     if not evaluation:
         raise NotFoundError("Evaluation not found")
     if evaluation.processed_at is not None:
@@ -217,7 +228,7 @@ def evaluate_challenge_context(session: Session, challenge_context_id: int) -> E
     now = datetime.now(timezone.utc)
 
     try:
-        eval_result: EvalResult = get_evaluation_result(
+        eval_result: EvalResult = _get_evaluation_result(
             session, challenge_context
         )
         result_text = eval_result.reason or "Unknown reason"

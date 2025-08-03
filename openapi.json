@@ -430,6 +430,51 @@
         }
       }
     },
+    "/challenges/{challenge_id}/evaluate": {
+      "get": {
+        "summary": "Evaluate Challenge Context",
+        "description": "Evaluate the challenge context",
+        "operationId": "evaluate_challenge_context_challenges__challenge_id__evaluate_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "challenge_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Challenge Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvalResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/tournaments/{tournament_id}/join": {
       "post": {
         "summary": "Join Tournament",
@@ -986,6 +1031,191 @@
         "title": "ChatUsage",
         "description": "Token usage information for the chat completion.\n\nAttributes:\n    prompt_tokens: Number of tokens in the prompt.\n    completion_tokens: Number of tokens in the completion.\n    total_tokens: Total number of tokens used."
       },
+      "EvalResult": {
+        "properties": {
+          "task_type": {
+            "type": "string",
+            "title": "Task Type"
+          },
+          "dataset_type": {
+            "type": "string",
+            "title": "Dataset Type"
+          },
+          "dataset_name": {
+            "type": "string",
+            "title": "Dataset Name"
+          },
+          "metric_type": {
+            "type": "string",
+            "title": "Metric Type"
+          },
+          "metric_value": {
+            "title": "Metric Value"
+          },
+          "task_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Name"
+          },
+          "dataset_config": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Config"
+          },
+          "dataset_split": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Split"
+          },
+          "dataset_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Revision"
+          },
+          "dataset_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Args"
+          },
+          "metric_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Name"
+          },
+          "metric_config": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Config"
+          },
+          "metric_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric Args"
+          },
+          "verified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified"
+          },
+          "verify_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify Token"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_type",
+          "dataset_type",
+          "dataset_name",
+          "metric_type",
+          "metric_value"
+        ],
+        "title": "EvalResult"
+      },
+      "FunctionCall": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "arguments": {
+            "type": "string",
+            "title": "Arguments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "arguments"
+        ],
+        "title": "FunctionCall",
+        "description": "Function call details within a tool call.\n\nAttributes:\n    name: The name of the function to call.\n    arguments: The arguments to call the function with (as JSON string)."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1073,6 +1303,31 @@
               }
             ],
             "title": "Tool Name"
+          },
+          "tool_calls": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ToolCall"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Calls"
+          },
+          "tool_call_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Call Id"
           }
         },
         "type": "object",
@@ -1176,6 +1431,30 @@
           "ACTIVE_AND_FUTURE"
         ],
         "title": "SelectionFilter"
+      },
+      "ToolCall": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "type": {
+            "type": "string",
+            "const": "function",
+            "title": "Type",
+            "default": "function"
+          },
+          "function": {
+            "$ref": "#/components/schemas/FunctionCall"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "function"
+        ],
+        "title": "ToolCall",
+        "description": "A tool call request from the model.\n\nAttributes:\n    id: Unique identifier for this tool call.\n    type: The type of tool call (currently only 'function').\n    function: The function call details."
       },
       "Tournaments": {
         "properties": {

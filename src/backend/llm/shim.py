@@ -1,5 +1,8 @@
-# A shim file to provide boiler plate for LLM-related functionality.
-
+"""
+This file is the sole LLM access point for the Challenge API. The intent of
+which is to provide a standard interface for the LLM client and agentic
+interactions.
+"""
 import json
 from typing import Iterable, Literal, Optional
 from backend.llm.agent import LLMAgent
@@ -13,6 +16,10 @@ DEFAULT_CHAT_COMPLETION_MODEL: str = "gpt-4o-mini"
 
 
 def map_chat_entries_to_messages(chat_entries: list[ChatEntry]) -> Iterable[Message]:
+    """
+    Maps chat entries, which contain the full OpenAI chat message format(s), to simple
+    Message objects for easier handling in the UI and in logical inspection.
+    """
     for chat_entry in chat_entries:
         if isinstance(chat_entry, ChatMessageWithTools):
             tool_call_id = chat_entry.tool_call_id if chat_entry.tool_call_id else None
@@ -56,26 +63,6 @@ def map_chat_entries_to_messages(chat_entries: list[ChatEntry]) -> Iterable[Mess
             )
         else:
             raise TypeError(f"Unsupported chat entry type: {type(chat_entry)}")
-
-
-def map_chat_response_with_tools(item: ChatResponseWithTools) -> ChatMessageWithTools:
-    assert isinstance(item, ChatResponseWithTools), "Item must be a ChatResponseWithTools"
-    # Mutate the object
-    return ChatMessageWithTools(
-        role=item.choices[0].message.role,
-        content=item.choices[0].message.content,
-        tool_calls=item.choices[0].message.tool_calls,
-        tool_call_id=item.choices[0].message.tool_call_id,
-    )
-
-
-def map_chat_response(item: ChatEntry) -> ChatMessage:
-    assert isinstance(item, ChatResponse), "Item must be a ChatResponse"
-    # Mutate the object
-    return ChatMessage(
-        role=item.choices[0].message.role, # type: ignore
-        content=item.choices[0].message.content,
-    )
 
 
 def map_message_to_chat_message(message: Message) -> ChatMessage:

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Literal, Optional
 
+from huggingface_hub import EvalResult
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +28,7 @@ from backend.db_api import add_chat_entries_to_challenge_no_checks, ensure_user_
 import backend.db_api as db_api
 from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
+from backend.evaluation import evaluate_challenge_context
 from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL, send_shim_request, send_shim_request_with_tools
 from backend.models.llm import (
     ChatEntry,
@@ -373,6 +375,26 @@ async def add_message_to_challenge(
         raise HTTPException(status_code=404, detail=e.message)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/challenges/{challenge_id}/evaluate", response_model=EvalResult)
+async def evaluate_challenge_context(
+    challenge_id: int,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Evaluate the challenge context"""
+    user: Users = ensure_user_exists(db, current_user["id"])
+    assert user.id is not None, "User ID should not be None"
+    # Get the challenge context for the user
+    try:
+        return db_api.get_challenge_context_response(
+            session=db,
+            user_id=user.id,
+            challenge_id=challenge_id,
+        )
+    except NotFoundError:
+        raise HTTPException(status_code=404, detail="Challenge not found")
 
 
 @app.post("/tournaments/{tournament_id}/join")
