@@ -1,4 +1,7 @@
+from json import tool
+from typing import Optional
 from pydantic import BaseModel
+from strenum import StrEnum
 
 from backend.database.models import (
     Badges,
@@ -6,6 +9,7 @@ from backend.database.models import (
     Tournaments,
     UserChallengeContexts,
 )
+from backend.models.llm import ToolCall
 
 
 class UserInfo(BaseModel):
@@ -30,8 +34,18 @@ class Message(BaseModel):
     content: str
     is_tool_call: bool = False
     tool_name: str | None = None
+    tool_calls: Optional[list[ToolCall]] = None
+    tool_call_id: str | None = None
 
 
 class ChallengeContextResponse(BaseModel):
     user_challenge_context: UserChallengeContexts
     messages: list[Message] = []
+
+
+class SelectionFilter(StrEnum):
+    PAST_ONLY = "PAST"
+    ACTIVE_ONLY = "ACTIVE"
+    FUTURE_ONLY = "FUTURE"
+    PAST_AND_ACTIVE = "PAST_AND_ACTIVE"
+    ACTIVE_AND_FUTURE = "ACTIVE_AND_FUTURE"
