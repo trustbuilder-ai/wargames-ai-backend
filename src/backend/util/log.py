@@ -8,7 +8,7 @@ from loguru import logger
 LOGS_PATH = "logs"
 
 logger.add(
-    f"{LOGS_PATH}/server.log",
+    f"{LOGS_PATH}/{time}.log",
     rotation="1 MB",
     # level="DEBUG",
     retention="7 days",
