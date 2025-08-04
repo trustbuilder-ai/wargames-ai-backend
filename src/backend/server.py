@@ -394,7 +394,11 @@ async def evaluate_challenge_context(
     try:
         return evaluation.evaluate_challenge_context(
             session=db,
-            challenge_context_id=challenge_id,)
+            challenge_context_id=db.exec(select(UserChallengeContexts).where(
+                UserChallengeContexts.user_id == user.id,
+                UserChallengeContexts.challenge_id == challenge_id,
+            )).first().id # type: ignore
+        )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Challenge not found")
 

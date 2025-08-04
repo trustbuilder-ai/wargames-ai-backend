@@ -72,11 +72,12 @@ def _set_challenge_context_processed(session: Session, challenge_context_id: int
     """
     # Reload the evaluation to ensure we have the latest state
     evaluation: Optional[ChallengeEvaluations] = session.exec(select(ChallengeEvaluations).where(
-            challenge_context_id == challenge_context_id)).first()
+            ChallengeEvaluations.user_challenge_context_id == challenge_context_id)).first()
     assert evaluation, "Evaluation must exist for challenge context"
     if evaluation.processed_at is not None:
         raise ValueError("Evaluation race condition")
     evaluation.processed_at = datetime.now(timezone.utc)
+    session.refresh(evaluation)
 
     assert evaluation.user_challenge_context, "User challenge context must exist for evaluation"
     evaluation.user_challenge_context.can_contribute = False
