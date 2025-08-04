@@ -9,6 +9,7 @@ from backend.database.models import (
     Tournaments,
     UserChallengeContexts,
 )
+from backend.models.evaluation import EvalResult
 from backend.models.llm import ToolCall
 
 
@@ -39,8 +40,14 @@ class Message(BaseModel):
 
 
 class ChallengeContextResponse(BaseModel):
+    """
+    Represents the full message context for a challenge, including user challenge context
+    and messages.
+    """
     user_challenge_context: UserChallengeContexts
     messages: list[Message] = []
+    eval_result: Optional[EvalResult] = None
+    remaining_message_count: int = 0
 
 
 class SelectionFilter(StrEnum):
@@ -49,3 +56,11 @@ class SelectionFilter(StrEnum):
     FUTURE_ONLY = "FUTURE"
     PAST_AND_ACTIVE = "PAST_AND_ACTIVE"
     ACTIVE_AND_FUTURE = "ACTIVE_AND_FUTURE"
+
+
+class ChallengeContextLLMResponse(BaseModel):
+    """
+    Represents a response from the LLM call.
+    """
+    remaining_message_count: int
+    messages: list[Message]

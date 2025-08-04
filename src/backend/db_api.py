@@ -4,7 +4,10 @@ import json
 from typing import Iterable, Literal, Optional
 
 from sqlmodel import Session, and_, select
+from sqlalchemy import func
 
+
+from backend.config import MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
 from backend.database.models import (
     Badges,
     ChallengeEvaluations,
@@ -101,11 +104,22 @@ def add_message_to_challenge(
             )
         )
     ).first()
+
+
     if not user_challenge_context:
         raise NotFoundError("User challenge context not found")
     user_challenge_context_id = user_challenge_context.id
     if not user_challenge_context.can_contribute:
         raise ValueError("User cannot contribute to this challenge context")
+
+
+    assert user_challenge_context.id is not None, "User challenge context ID should not be None"
+    if get_user_message_count_in_challenge_context(
+            session=session,
+            user_challenge_context_id=user_challenge_context.id,
+        ) >= MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE:
+            raise ValueError("Maximum message count reached for this challenge.")
+
 
     if not user_challenge_context_id:
         raise NotFoundError("User challenge context not found")
@@ -386,15 +400,56 @@ def load_challenge_context_messages(
     Load all messages for a given user challenge context.
     Returns a list of UserChallengeContextMessages.
     """
-    messages: Iterable[UserChallengeContextMessages] = session.exec(
+    user_challenge_context: Optional[UserChallengeContexts] = session.exec(
+        select(UserChallengeContexts).where(
+            UserChallengeContexts.id == user_challenge_context_id
+        )
+    ).first()
+    if not user_challenge_context:
+        raise NotFoundError("User challenge context not found")
+
+
+    default_messages: list[Message] = []
+    assert user_challenge_context.challenge is not None, "Challenge should not be None"
+    if user_challenge_context.challenge.system_prompt:
+        default_messages.append(
+            Message(
+                role="system",
+                content=user_challenge_context.challenge.system_prompt
+            )
+        )
+    if user_challenge_context.challenge.initial_llm_prompt:
+        default_messages.append(
+            Message(
+                role="assistant",
+                content=user_challenge_context.challenge.initial_llm_prompt
+            )
+        )
+
+    context_messages: Iterable[UserChallengeContextMessages] = session.exec(
         select(UserChallengeContextMessages).where(
             UserChallengeContextMessages.user_challenge_context_id == user_challenge_context_id
         )
     ).all()
-    logger.info(
-        f"Loading {len(messages)} messages for user challenge context {user_challenge_context_id}"
-    )
-    return map_chat_entries_to_messages(list(_instantiate_challenge_context_messages(messages)))
+    return default_messages + list(map_chat_entries_to_messages(list(_instantiate_challenge_context_messages(context_messages))))
+
+
+def get_user_message_count_in_challenge_context(
+    session: Session, user_challenge_context_id: int
+) -> int:
+    """
+    Get the count of user messages in a given challenge context.
+    Returns the count of messages.
+    """
+    count: int = session.exec(
+        select(func.count()).select_from(UserChallengeContextMessages).where(
+            and_(
+                UserChallengeContextMessages.user_challenge_context_id == user_challenge_context_id,
+                UserChallengeContextMessages.role == "user",
+            )
+        )
+    ).one()
+    return count
 
 
 def get_challenge_tools(

@@ -12,6 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 from supabase import Client, create_client
 
+from backend.config import MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
 from backend.database.connection import get_db
 from backend.database.models import (
     Badges,
@@ -21,12 +22,12 @@ from backend.database.models import (
     UserChallengeContexts,
     Users,
 )
-from backend.db_api import add_chat_entries_to_challenge_no_checks, ensure_user_exists, get_user_info
+from backend.db_api import _instantiate_challenge_context_messages, add_chat_entries_to_challenge_no_checks, ensure_user_exists, get_user_info
 import backend.db_api as db_api
 from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
 import backend.evaluation as evaluation
-from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL, send_shim_request, send_shim_request_with_tools
+from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL, map_chat_entries_to_messages, send_shim_request, send_shim_request_with_tools
 from backend.models.evaluation import EvalResult
 from backend.models.llm import (
     ChatEntry,
@@ -35,7 +36,7 @@ from backend.models.llm import (
     LLMHealthStatus,
     ModelsResponse,
 )
-from backend.models.supplemental import ChallengeContextResponse, Message, SelectionFilter, UserInfo
+from backend.models.supplemental import ChallengeContextLLMResponse, ChallengeContextResponse, Message, SelectionFilter, UserInfo
 from backend.util.log import logger
 
 # Initialize FastAPI
@@ -305,7 +306,7 @@ async def start_challenge(
 # Route for submitting a message to a challenge agent
 @app.post(
     "/challenges/{challenge_id}/add_message",
-    response_model=ChallengeContextResponse,
+    response_model=ChallengeContextLLMResponse,
 )
 async def add_message_to_challenge(
     challenge_id: int,
@@ -318,6 +319,7 @@ async def add_message_to_challenge(
     """Submit a message to the challenge agent"""
     try:
         user: Users = ensure_user_exists(db, current_user["id"])
+        assert user.id is not None, "User ID should not be None"
 
         user_challenge_context_id: int = db_api.add_message_to_challenge(
             session=db,
@@ -331,7 +333,6 @@ async def add_message_to_challenge(
             session=db,
             user_challenge_context_id=user_challenge_context_id,
         ))
-        logger.info(f"Number of context messages loaded: {len(context_messages)}")
 
         if solicit_llm_response:
             # XXXXXX TODO: add LLM contexts.
@@ -360,10 +361,12 @@ async def add_message_to_challenge(
                 user_challenge_context_id=user_challenge_context_id,
                 chat_entries=chat_entry_list,
             )
-            return db_api.get_challenge_context_response(
-                session=db,
-                user_id=user.id,
-                challenge_id=challenge_id,
+            return ChallengeContextLLMResponse(
+                remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE - db_api.get_user_message_count_in_challenge_context(
+                    session=db,
+                    user_challenge_context_id=user_challenge_context_id,
+                ),
+                messages=list(map_chat_entries_to_messages(chat_entry_list)),
             )
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)

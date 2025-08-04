@@ -51,6 +51,8 @@ class Challenges(SQLModel, table=True):
     description: Optional[str] = Field(default=None, sa_column=Column('description', Text))
     required_tools: Optional[str] = Field(default=None, sa_column=Column('required_tools', Text))
     evaluation_prompt: Optional[str] = Field(default=None, sa_column=Column('evaluation_prompt', Text))
+    system_prompt: Optional[str] = Field(default=None, sa_column=Column('system_prompt', Text))
+    initial_llm_prompt: Optional[str] = Field(default=None, sa_column=Column('initial_llm_prompt', Text))
 
     tournament: Optional['Tournaments'] = Relationship(back_populates='challenges')
     badges: List['Badges'] = Relationship(back_populates='challenge')
