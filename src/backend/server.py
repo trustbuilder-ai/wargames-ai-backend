@@ -12,7 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 from supabase import Client, create_client
 
-from backend.config import MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
+from backend.config import MAX_MESSAGE_LENGTH, MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
 from backend.database.connection import get_db
 from backend.database.models import (
     Badges,
@@ -45,7 +45,9 @@ app = FastAPI(title="Backend API with Supabase Auth")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Your frontend URL
+    allow_origins=[
+        "http://localhost:3000",  # Your local frontend
+        "https://trustbuilder-ai.github.io"],  # GitHub Pages Frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -266,7 +268,6 @@ async def list_challenges(
     tournament_id: int | None = None,
     page_index: int = 0,
     count: int = 10,
-    current_user: dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """List challenges with filtering"""
@@ -298,8 +299,9 @@ async def start_challenge(
 
     try:
         assert challenge.id is not None, "Challenge ID should not be None"
-        db_api.start_challenge(db, user.id, challenge.id)
+        return db_api.start_challenge(db, user.id, challenge.id)
     except ValueError as e:
+        logger.error(f"Failed to start challenge {challenge_id} for user {user.id}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -318,6 +320,11 @@ async def add_message_to_challenge(
 ):
     """Submit a message to the challenge agent"""
     try:
+        if len(message) > MAX_MESSAGE_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH} characters",
+            )
         user: Users = ensure_user_exists(db, current_user["id"])
         assert user.id is not None, "User ID should not be None"
 

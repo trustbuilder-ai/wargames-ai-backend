@@ -19,6 +19,7 @@ from backend.database.models import (
     Users,
     UserTournamentEnrollments,
 )
+from backend.evaluation import format_eval_result
 from backend.util.log import logger
 
 from backend.exceptions import NotFoundError
@@ -80,6 +81,7 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
         select(Badges).join(UserBadges).where(UserBadges.user_id == user.id)
     ).all()
 
+
     return UserInfo(
         user_id=user.id,
         email=None,  # Email is not stored in the Users model
@@ -87,6 +89,7 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
         active_challenges=active_challenges,
         badges=badges,
     )
+
 
 def add_message_to_challenge(
     session: Session, user_id: int, challenge_id: int, model: str, message: str, role: Literal["user", "assistant", "system"] = "user"
@@ -193,15 +196,37 @@ def get_challenge_context_response(
     if not context:
         raise NotFoundError("User challenge context not found")
 
+    default_messages: list[Message] = []
+    assert context.challenge is not None, "Challenge should not be None"
+    if context.challenge.system_prompt:
+        default_messages.append(
+            Message(
+                role="system",
+                content=context.challenge.system_prompt
+            )
+        )
+    if context.challenge.initial_llm_prompt:
+        default_messages.append(
+            Message(
+                role="assistant",
+                content=context.challenge.initial_llm_prompt
+            )
+        )
+
     messages = session.exec(
         select(UserChallengeContextMessages).where(
             UserChallengeContextMessages.user_challenge_context_id == context.id
         )
     ).all()
+    assert context.id is not None, "User challenge context ID should not be None"
     return ChallengeContextResponse(
         user_challenge_context=context,
         # XXX: This should not be so inefficient.
-        messages=list(map_chat_entries_to_messages(list(_instantiate_challenge_context_messages(messages)))),
+        messages= default_messages + list(map_chat_entries_to_messages(list(_instantiate_challenge_context_messages(messages)))),
+        remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE - get_user_message_count_in_challenge_context(
+            session, context.id
+        ),
+        eval_result=format_eval_result(context.challenge_evaluations[0]) if context.challenge_evaluations else None,
     )
 
 
@@ -209,9 +234,7 @@ def start_challenge(
     session: Session, user_id: int, challenge_id: int
 ) -> UserChallengeContexts:
     """
-    Start a challenge for the user. If the user is not enrolled in the tournament,
-    they will be enrolled automatically.
-    Returns the UserChallengeContexts object.
+    Start a challenge for the user.  Returns the UserChallengeContexts object.
     """
     # Check if challenge exists
 
@@ -228,9 +251,7 @@ def start_challenge(
     ).first()
 
     if existing_context:
-        raise ValueError(
-            f"User {user_id} already has a context for challenge {challenge_id}."
-        )
+        return existing_context
 
     # Create new challenge context
     context = UserChallengeContexts(
@@ -239,13 +260,14 @@ def start_challenge(
         started_at=datetime.now(UTC),
         can_contribute=True,
     )
-
+    session.add(context)
+    session.flush()
+    assert context.id is not None, "User challenge context ID should not be None"
     evaluation: ChallengeEvaluations = ChallengeEvaluations(
         user_challenge_context_id=context.id,
         created_at=datetime.now(UTC),
     )
 
-    session.add(context)
     session.add(evaluation)
     session.commit()
     session.refresh(context)

@@ -78,16 +78,13 @@ def _set_challenge_context_processed(session: Session, challenge_context_id: int
         raise ValueError("Evaluation race condition")
     evaluation.processed_at = datetime.now(timezone.utc)
 
-    challenge_context: Optional[UserChallengeContexts] = session.exec(select(UserChallengeContexts).where(
-        UserChallengeContexts.id == challenge_context_id)).first()
-
-    assert challenge_context, "Challenge must exist for evaluation. DB schema error?"
-    challenge_context.can_contribute = False
+    assert evaluation.user_challenge_context, "User challenge context must exist for evaluation"
+    evaluation.user_challenge_context.can_contribute = False
 
     session.add(evaluation)
-    session.add(challenge_context)
+    session.add(evaluation.user_challenge_context)
     session.commit()
-    return challenge_context
+    return evaluation.user_challenge_context
 
 
 def get_raw_llm_evaluation(
