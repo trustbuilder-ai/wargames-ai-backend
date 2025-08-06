@@ -51,6 +51,8 @@ class Challenges(SQLModel, table=True):
     description: Optional[str] = Field(default=None, sa_column=Column('description', Text))
     required_tools: Optional[str] = Field(default=None, sa_column=Column('required_tools', Text))
     evaluation_prompt: Optional[str] = Field(default=None, sa_column=Column('evaluation_prompt', Text))
+    system_prompt: Optional[str] = Field(default=None, sa_column=Column('system_prompt', Text))
+    initial_llm_prompt: Optional[str] = Field(default=None, sa_column=Column('initial_llm_prompt', Text))
 
     tournament: Optional['Tournaments'] = Relationship(back_populates='challenges')
     badges: List['Badges'] = Relationship(back_populates='challenge')
@@ -98,11 +100,11 @@ class UserChallengeContexts(SQLModel, table=True):
         ForeignKeyConstraint(['challenge_id'], ['challenges.id'], ondelete='CASCADE', name='fk_context_challenge'),
         ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE', name='fk_context_user'),
         PrimaryKeyConstraint('id', name='user_challenge_contexts_pkey'),
+
         UniqueConstraint('user_id', 'challenge_id', name='uq_user_challenge'),
         Index('idx_contexts_challenge_id', 'challenge_id'),
         Index('idx_contexts_user_id', 'user_id')
     )
-
     id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, primary_key=True))
     can_contribute: bool = Field(sa_column=Column('can_contribute', Boolean))
     challenge_id: int = Field(sa_column=Column('challenge_id', Integer))

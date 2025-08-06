@@ -12,6 +12,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 from supabase import Client, create_client
 
+from backend.config import MAX_MESSAGE_LENGTH, MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
 from backend.database.connection import get_db
 from backend.database.models import (
     Badges,
@@ -26,7 +27,7 @@ import backend.db_api as db_api
 from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
 import backend.evaluation as evaluation
-from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL, send_shim_request, send_shim_request_with_tools
+from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL, map_chat_entries_to_messages, send_shim_request, send_shim_request_with_tools
 from backend.models.evaluation import EvalResult
 from backend.models.llm import (
     ChatEntry,
@@ -35,7 +36,7 @@ from backend.models.llm import (
     LLMHealthStatus,
     ModelsResponse,
 )
-from backend.models.supplemental import ChallengeContextResponse, Message, SelectionFilter, UserInfo
+from backend.models.supplemental import ChallengeContextLLMResponse, ChallengeContextResponse, ChallengesPublic, Message, SelectionFilter, UserInfo
 from backend.util.log import logger
 
 # Initialize FastAPI
@@ -44,7 +45,9 @@ app = FastAPI(title="Backend API with Supabase Auth")
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Your frontend URL
+    allow_origins=[
+        "http://localhost:3000",  # Your local frontend
+        "https://trustbuilder-ai.github.io"],  # GitHub Pages Frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -260,21 +263,25 @@ async def get_badge(
     raise HTTPException(status_code=404, detail="Badge not found")
 
 
-@app.get("/challenges", response_model=list[Challenges])
+@app.get("/challenges", response_model=list[ChallengesPublic])
 async def list_challenges(
     tournament_id: int | None = None,
     page_index: int = 0,
     count: int = 10,
-    current_user: dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """List challenges with filtering"""
-    return db_api.list_challenges(
+    challenges: list[Challenges] = list(db_api.list_challenges(
         session=db,
         tournament_id=tournament_id,
         page_index=page_index,
         count=count
-    )
+    ))
+    return [ChallengesPublic(
+            challenge=challenge,
+            tournament_name=challenge.tournament.name if challenge.tournament else "No Tournament"
+        ) for challenge in challenges]
+
 
 # start challenge route
 @app.post("/challenges/{challenge_id}/start", response_model=UserChallengeContexts)
@@ -297,15 +304,16 @@ async def start_challenge(
 
     try:
         assert challenge.id is not None, "Challenge ID should not be None"
-        db_api.start_challenge(db, user.id, challenge.id)
+        return db_api.start_challenge(db, user.id, challenge.id)
     except ValueError as e:
+        logger.error(f"Failed to start challenge {challenge_id} for user {user.id}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 
 # Route for submitting a message to a challenge agent
 @app.post(
     "/challenges/{challenge_id}/add_message",
-    response_model=ChallengeContextResponse,
+    response_model=ChallengeContextLLMResponse,
 )
 async def add_message_to_challenge(
     challenge_id: int,
@@ -317,7 +325,13 @@ async def add_message_to_challenge(
 ):
     """Submit a message to the challenge agent"""
     try:
+        if len(message) > MAX_MESSAGE_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH} characters",
+            )
         user: Users = ensure_user_exists(db, current_user["id"])
+        assert user.id is not None, "User ID should not be None"
 
         user_challenge_context_id: int = db_api.add_message_to_challenge(
             session=db,
@@ -331,7 +345,6 @@ async def add_message_to_challenge(
             session=db,
             user_challenge_context_id=user_challenge_context_id,
         ))
-        logger.info(f"Number of context messages loaded: {len(context_messages)}")
 
         if solicit_llm_response:
             # XXXXXX TODO: add LLM contexts.
@@ -360,10 +373,12 @@ async def add_message_to_challenge(
                 user_challenge_context_id=user_challenge_context_id,
                 chat_entries=chat_entry_list,
             )
-            return db_api.get_challenge_context_response(
-                session=db,
-                user_id=user.id,
-                challenge_id=challenge_id,
+            return ChallengeContextLLMResponse(
+                remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE - db_api.get_user_message_count_in_challenge_context(
+                    session=db,
+                    user_challenge_context_id=user_challenge_context_id,
+                ),
+                messages=list(map_chat_entries_to_messages(chat_entry_list)),
             )
     except NotFoundError as e:
         raise HTTPException(status_code=404, detail=e.message)
@@ -382,9 +397,13 @@ async def evaluate_challenge_context(
     assert user.id is not None, "User ID should not be None"
     # Get the challenge context for the user
     try:
-        return evaluation.evaluate_challenge_context(
+        return await evaluation.evaluate_challenge_context(
             session=db,
-            challenge_context_id=challenge_id,)
+            challenge_context_id=db.exec(select(UserChallengeContexts).where(
+                UserChallengeContexts.user_id == user.id,
+                UserChallengeContexts.challenge_id == challenge_id,
+            )).first().id # type: ignore
+        )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Challenge not found")
 
