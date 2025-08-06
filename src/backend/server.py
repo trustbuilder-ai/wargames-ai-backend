@@ -22,7 +22,7 @@ from backend.database.models import (
     UserChallengeContexts,
     Users,
 )
-from backend.db_api import _instantiate_challenge_context_messages, add_chat_entries_to_challenge_no_checks, ensure_user_exists, get_user_info
+from backend.db_api import add_chat_entries_to_challenge_no_checks, ensure_user_exists, get_user_info
 import backend.db_api as db_api
 from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
@@ -36,7 +36,7 @@ from backend.models.llm import (
     LLMHealthStatus,
     ModelsResponse,
 )
-from backend.models.supplemental import ChallengeContextLLMResponse, ChallengeContextResponse, Message, SelectionFilter, UserInfo
+from backend.models.supplemental import ChallengeContextLLMResponse, ChallengeContextResponse, ChallengesPublic, Message, SelectionFilter, UserInfo
 from backend.util.log import logger
 
 # Initialize FastAPI
@@ -263,7 +263,7 @@ async def get_badge(
     raise HTTPException(status_code=404, detail="Badge not found")
 
 
-@app.get("/challenges", response_model=list[Challenges])
+@app.get("/challenges", response_model=list[ChallengesPublic])
 async def list_challenges(
     tournament_id: int | None = None,
     page_index: int = 0,
@@ -271,12 +271,17 @@ async def list_challenges(
     db: Session = Depends(get_db),
 ):
     """List challenges with filtering"""
-    return db_api.list_challenges(
+    challenges: list[Challenges] = list(db_api.list_challenges(
         session=db,
         tournament_id=tournament_id,
         page_index=page_index,
         count=count
-    )
+    ))
+    return [ChallengesPublic(
+            challenge=challenge,
+            tournament_name=challenge.tournament.name if challenge.tournament else "No Tournament"
+        ) for challenge in challenges]
+
 
 # start challenge route
 @app.post("/challenges/{challenge_id}/start", response_model=UserChallengeContexts)
@@ -392,7 +397,7 @@ async def evaluate_challenge_context(
     assert user.id is not None, "User ID should not be None"
     # Get the challenge context for the user
     try:
-        return evaluation.evaluate_challenge_context(
+        return await evaluation.evaluate_challenge_context(
             session=db,
             challenge_context_id=db.exec(select(UserChallengeContexts).where(
                 UserChallengeContexts.user_id == user.id,

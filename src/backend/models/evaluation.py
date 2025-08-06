@@ -21,4 +21,4 @@ class EvalResult(BaseModel):
     # evaluation.
     reason: Optional[str] = None
     status: EvalStatus
-
+    challenge_id: Optional[int] = None

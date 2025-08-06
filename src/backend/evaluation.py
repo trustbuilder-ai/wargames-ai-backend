@@ -21,6 +21,7 @@ from backend.models.evaluation import EvalResult, EvalStatus
 from backend.models.llm import ChatMessage, ChatRequest, ChatResponse
 from backend.models.supplemental import Message
 from backend.llm.config import llm_config # type: ignore
+from backend.util.log import logger
 
 
 DEFAULT_EVALUATION_MODEL: str = "gpt-4o"
@@ -76,8 +77,8 @@ def _set_challenge_context_processed(session: Session, challenge_context_id: int
     assert evaluation, "Evaluation must exist for challenge context"
     if evaluation.processed_at is not None:
         raise ValueError("Evaluation race condition")
+    logger.info(f"Setting challenge context {challenge_context_id} as processed. Evaluation ID: {evaluation.id}")
     evaluation.processed_at = datetime.now(timezone.utc)
-    session.refresh(evaluation)
 
     assert evaluation.user_challenge_context, "User challenge context must exist for evaluation"
     evaluation.user_challenge_context.can_contribute = False
@@ -88,7 +89,7 @@ def _set_challenge_context_processed(session: Session, challenge_context_id: int
     return evaluation.user_challenge_context
 
 
-def get_raw_llm_evaluation(
+async def get_raw_llm_evaluation(
         criteria: str, context: list[Message]) -> dict[str, int|str]:
     """
     Get the raw evaluation result from the LLM.
@@ -117,7 +118,7 @@ def get_raw_llm_evaluation(
        model=DEFAULT_EVALUATION_MODEL,
        messages=messages
     )
-    response: ChatResponse = asyncio.run(client.chat_completion(chat_request))
+    response: ChatResponse = await client.chat_completion(chat_request)
     try:
         results_raw: dict[str, int|str] = json.loads(response.choices[0].message.content)
         if "success" not in results_raw or not isinstance(results_raw["success"], int):
@@ -151,7 +152,7 @@ def get_called_tools(
     return list(called_tool_names)
 
 
-def _get_evaluation_result(
+async def _get_evaluation_result(
         session: Session, challenge_context: UserChallengeContexts) -> EvalResult:
     # This challenge context does not have the messages in a user-available format by
     # default
@@ -172,11 +173,11 @@ def _get_evaluation_result(
             status = EvalStatus.SUCCEEDED
             reason = "All tools called."
     
-    if challenge.evaluation_prompt and challenge.evaluation_prompt.strip() and status not in [EvalStatus.FAILED, EvalStatus.NOT_EVALUATED]:
+    if challenge.evaluation_prompt and challenge.evaluation_prompt.strip() and status != EvalStatus.FAILED:
         messages: list[Message] =  list(map_chat_entries_to_messages(
             list(db_api._instantiate_challenge_context_messages(list( # type: ignore
                 challenge_context.user_challenge_context_messages)))))
-        evaluation_result: dict[str, str|int] = get_raw_llm_evaluation(challenge.evaluation_prompt, messages)
+        evaluation_result: dict[str, str|int] = await get_raw_llm_evaluation(challenge.evaluation_prompt, messages)
         if evaluation_result["success"]:
             status = EvalStatus.SUCCEEDED
         else:
@@ -193,24 +194,27 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
     """
     Format the evaluation result into a standard EvalResult object.
     """
+    assert evaluation.user_challenge_context, "User challenge context must exist for evaluation"
     return EvalResult(
         reason=evaluation.result_text or "No result text",
         status=EvalStatus.SUCCEEDED if evaluation.succeeded_at else (
             EvalStatus.FAILED if evaluation.failed_at else (
                 EvalStatus.ERRORED if evaluation.errored_at else EvalStatus.NOT_EVALUATED
             )
-        )
+        ),
+        challenge_id=evaluation.user_challenge_context.challenge_id
     )
 
 
-def evaluate_challenge_context(session: Session, challenge_context_id: int) -> EvalResult:
+async def evaluate_challenge_context(session: Session, challenge_context_id: int) -> EvalResult:
     """
     Evaluate a challenge context by processing its messages and criteria.
     This function retrieves the challenge context, checks if it has been processed,
     and if not, processes it to get the evaluation result.
     """
+    logger.info(f"Evaluating challenge context with ID: {challenge_context_id}")
     evaluation: Optional[ChallengeEvaluations] = session.exec(select(ChallengeEvaluations).where(
-            challenge_context_id == challenge_context_id)).first()
+            ChallengeEvaluations.user_challenge_context_id == challenge_context_id)).first()
     if not evaluation:
         raise NotFoundError("Evaluation not found")
     if evaluation.processed_at is not None:
@@ -219,6 +223,7 @@ def evaluate_challenge_context(session: Session, challenge_context_id: int) -> E
     with Locker(session).acquire_lock(str(challenge_context_id)):
         challenge_context: UserChallengeContexts = _set_challenge_context_processed(session, challenge_context_id)
 
+    session.refresh(challenge_context)
     # Format the challenge context for evaluation.
     result_text: str = "not processed"
     result: Optional[str] = None
@@ -226,7 +231,7 @@ def evaluate_challenge_context(session: Session, challenge_context_id: int) -> E
     now = datetime.now(timezone.utc)
 
     try:
-        eval_result: EvalResult = _get_evaluation_result(
+        eval_result: EvalResult = await _get_evaluation_result(
             session, challenge_context
         )
         result_text = eval_result.reason or "Unknown reason"

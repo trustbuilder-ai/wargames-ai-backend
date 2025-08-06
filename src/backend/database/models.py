@@ -100,11 +100,11 @@ class UserChallengeContexts(SQLModel, table=True):
         ForeignKeyConstraint(['challenge_id'], ['challenges.id'], ondelete='CASCADE', name='fk_context_challenge'),
         ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE', name='fk_context_user'),
         PrimaryKeyConstraint('id', name='user_challenge_contexts_pkey'),
+
         UniqueConstraint('user_id', 'challenge_id', name='uq_user_challenge'),
         Index('idx_contexts_challenge_id', 'challenge_id'),
         Index('idx_contexts_user_id', 'user_id')
     )
-
     id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, primary_key=True))
     can_contribute: bool = Field(sa_column=Column('can_contribute', Boolean))
     challenge_id: int = Field(sa_column=Column('challenge_id', Integer))

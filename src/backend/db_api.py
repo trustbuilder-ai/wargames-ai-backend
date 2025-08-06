@@ -5,6 +5,7 @@ from typing import Iterable, Literal, Optional
 
 from sqlmodel import Session, and_, select
 from sqlalchemy import func
+from sqlalchemy.orm import selectinload
 
 
 from backend.config import MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
@@ -65,9 +66,9 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
         )
     ).all()
 
-    active_challenges = session.exec(
-        select(Challenges)
-        .join(UserChallengeContexts)
+    active_challenge_contexts = session.exec(
+        select(UserChallengeContexts)
+        .join(Challenges)
         .where(
             and_(
                 UserChallengeContexts.user_id == user.id,
@@ -77,17 +78,25 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
             )
         )
     ).all()
+
     badges = session.exec(
         select(Badges).join(UserBadges).where(UserBadges.user_id == user.id)
     ).all()
 
+    evaluations: Iterable[ChallengeEvaluations] = session.exec(
+        select(ChallengeEvaluations).join(UserChallengeContexts).where(
+            UserChallengeContexts.user_id == user.id
+        )
+    ).all()
 
+    assert user.id is not None, "User ID should not be None"
     return UserInfo(
         user_id=user.id,
         email=None,  # Email is not stored in the Users model
-        active_tournaments=active_tournaments,
-        active_challenges=active_challenges,
-        badges=badges,
+        active_tournaments=list(active_tournaments),
+        active_challenge_contexts=list(active_challenge_contexts),
+        badges=list(badges),
+        eval_results=list([format_eval_result(evaluation) for evaluation in evaluations]),
     )
 
 
@@ -253,6 +262,15 @@ def start_challenge(
     if existing_context:
         return existing_context
 
+    # Auto-join the tournament for this challenge, which is idempotent.
+    challenge = session.get(Challenges, challenge_id)
+    if not challenge:
+        raise NotFoundError("Challenge not found")
+    if not challenge.tournament:
+        raise ValueError("Challenge is not part of a tournament")
+    assert challenge.tournament.id is not None, "Tournament ID should not be None"
+    join_tournament(session, user_id, challenge.tournament.id)
+
     # Create new challenge context
     context = UserChallengeContexts(
         user_id=user_id,
@@ -374,7 +392,7 @@ def list_challenges(
     """
     List challenges based on tournament ID, pagination, and count.
     """
-    statement = select(Challenges)
+    statement = select(Challenges).options(selectinload(Challenges.tournament))
     if tournament_id:
         statement = statement.where(Challenges.tournament_id == tournament_id)
     statement = statement.offset(page_index * count).limit(count)

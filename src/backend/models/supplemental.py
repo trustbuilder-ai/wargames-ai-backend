@@ -22,8 +22,9 @@ class UserInfo(BaseModel):
     user_id: int
     email: str | None = None
     active_tournaments: list[Tournaments]
-    active_challenges: list[Challenges]
+    active_challenge_contexts: list[UserChallengeContexts]
     badges: list[Badges]
+    eval_results: list[EvalResult] = []
 
     class Config:
         from_attributes = True
@@ -64,3 +65,8 @@ class ChallengeContextLLMResponse(BaseModel):
     """
     remaining_message_count: int
     messages: list[Message]
+
+
+class ChallengesPublic(BaseModel):
+    challenge: Challenges
+    tournament_name: str
