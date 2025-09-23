@@ -41,3 +41,7 @@ logs/
 coverage/
 .nyc_output/
 .hypothesis
+
+# Supabase local files
+supabase/.branches/
+supabase/.temp/
