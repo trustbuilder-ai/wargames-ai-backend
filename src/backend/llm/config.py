@@ -3,15 +3,16 @@
 This module handles model configuration loading from YAML file.
 """
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
+import backend
 from backend.llm.settings import api_keys
 from backend.llm.tools import ToolRegistry
-import backend
+
 
 @dataclass
 class ModelConfig:
@@ -31,7 +32,11 @@ class LLMConfig:
     # Default to LLMConfig in project root (backend/llm_config.yaml),
     # deriving the path from the backend module directory using pathlib.
     # for path compatibility across different environments.
-    def __init__(self, config_path: str|Path = Path(backend.__path__[0]).parent.parent / "llm_config.yaml"): # type: ignore
+    def __init__(
+        self,
+        config_path: str | Path = Path(backend.__path__[0]).parent.parent
+        / "llm_config.yaml",
+    ):  # type: ignore
         """Initialize LLM configuration from YAML file."""
         print(f"Config path: {config_path}")
         self._models: dict[str, ModelConfig] = {}
@@ -41,7 +46,7 @@ class LLMConfig:
         self._config: dict[str, Any] = self._load_config(config_path)
         self._initialize_config(self._config)
 
-    def _load_config(self, config_path: str|Path) -> dict[str, Any]:
+    def _load_config(self, config_path: str | Path) -> dict[str, Any]:
         """Load configuration from YAML file."""
         try:
             config_file = Path(config_path)
@@ -74,18 +79,19 @@ class LLMConfig:
         self.default_max_tokens = defaults.get("max_tokens", 4096)
         self.default_model = defaults.get("default_model", "gpt-4o-mini")
 
-
     def _load_default_config(self) -> dict[str, dict[str, dict[str, str]]]:
         """Load basic fallback configuration."""
         return {
             "models": {
-                "gpt-4o": asdict(ModelConfig(
-                    id="gpt-4o",
-                    provider="openai",
-                    display_name="GPT-4o",
-                    description="OpenAI GPT-4o model",
-                    requires_key="OPENAI_API_KEY",
-                )),
+                "gpt-4o": asdict(
+                    ModelConfig(
+                        id="gpt-4o",
+                        provider="openai",
+                        display_name="GPT-4o",
+                        description="OpenAI GPT-4o model",
+                        requires_key="OPENAI_API_KEY",
+                    )
+                ),
             },
         }
 
@@ -112,7 +118,9 @@ class LLMConfig:
             return False
         return api_keys.is_provider_available(model.provider)
 
-    def get_tool_registry(self, allowed_tools: Optional[list[str]] = None) -> Optional[ToolRegistry]:
+    def get_tool_registry(
+        self, allowed_tools: list[str] | None = None
+    ) -> ToolRegistry | None:
         """Get the tool registry if tools are configured.
 
         Returns:
@@ -122,8 +130,12 @@ class LLMConfig:
             return None
         tool_registry = ToolRegistry()
         if allowed_tools is not None:
-            filtered_config = {name: self._config["tools"][name] for name in allowed_tools if name in self._config["tools"]}
-            
+            filtered_config = {
+                name: self._config["tools"][name]
+                for name in allowed_tools
+                if name in self._config["tools"]
+            }
+
             tool_registry.load_from_config(filtered_config)
         else:
             # Load all tools from config

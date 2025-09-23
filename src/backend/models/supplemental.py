@@ -1,6 +1,4 @@
-from json import tool
-from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from strenum import StrEnum
 
 from backend.database.models import (
@@ -36,7 +34,7 @@ class Message(BaseModel):
     content: str
     is_tool_call: bool = False
     tool_name: str | None = None
-    tool_calls: Optional[list[ToolCall]] = None
+    tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
 
 
@@ -45,9 +43,10 @@ class ChallengeContextResponse(BaseModel):
     Represents the full message context for a challenge, including user challenge context
     and messages.
     """
+
     user_challenge_context: UserChallengeContexts
     messages: list[Message] = []
-    eval_result: Optional[EvalResult] = None
+    eval_result: EvalResult | None = None
     remaining_message_count: int = 0
 
 
@@ -59,10 +58,38 @@ class SelectionFilter(StrEnum):
     ACTIVE_AND_FUTURE = "ACTIVE_AND_FUTURE"
 
 
+# ============================================================================
+# ScrollyTell models for message tree structures
+# ============================================================================
+
+
+class MessageContainer(BaseModel):
+    """Container for a message with its position in the message tree.
+
+    Used for the ScrollyTell feature to represent hierarchical message structures.
+
+    Attributes:
+        id: Unique identifier for the message container.
+        parent_message_id: ID of the parent message, null for root.
+        message: The actual message content.
+    """
+
+    id: int = Field(..., description="Unique identifier for the message container")
+    parent_message_id: int | None = Field(
+        default=None, description="ID of the parent message, null for root"
+    )
+    message: Message = Field(..., description="The actual message content")
+
+
+# MessageTree is represented as a List type alias
+MessageTree = list[MessageContainer]
+
+
 class ChallengeContextLLMResponse(BaseModel):
     """
     Represents a response from the LLM call.
     """
+
     remaining_message_count: int
     messages: list[Message]
 

@@ -1,7 +1,4 @@
-
-
-
-#def format_message(message: dict[str, Any]) -> dict[str, Any]:
+# def format_message(message: dict[str, Any]) -> dict[str, Any]:
 #    """Format a message for the LLM"""
 #    return {
 #        "role": message.get("role"),

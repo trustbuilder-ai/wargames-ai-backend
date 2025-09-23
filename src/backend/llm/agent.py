@@ -11,14 +11,14 @@ import litellm
 from backend.llm.client import LLMClient
 from backend.llm.tools import ToolRegistry
 from backend.models.llm import (
+    ChatChoiceWithTools,
     ChatMessageWithTools,
     ChatRequestWithTools,
     ChatResponseWithTools,
-    ChatChoiceWithTools,
     ChatUsage,
     ConversationTurn,
-    ToolCall,
     FunctionCall,
+    ToolCall,
     ToolExecutionResult,
 )
 from backend.util.log import logger
@@ -57,7 +57,7 @@ class LLMAgent:
         request: ChatRequestWithTools,
         mock_mode: bool = True,
         auto_execute_tools: bool = True,
-    ) -> list[ChatResponseWithTools|ChatMessageWithTools]:
+    ) -> list[ChatResponseWithTools | ChatMessageWithTools]:
         """Execute a chat completion with tool calling support.
 
         Args:
@@ -86,7 +86,9 @@ class LLMAgent:
             return [await self._standard_completion(request)]
 
         # Execute the tool-calling loop
-        current_messages: list[ChatMessageWithTools|ChatResponseWithTools] = list(request.messages)
+        current_messages: list[ChatMessageWithTools | ChatResponseWithTools] = list(
+            request.messages
+        )
 
         # Create request with current messages
         current_request = ChatRequestWithTools(
@@ -112,7 +114,7 @@ class LLMAgent:
         # Execute the tool calls
         tool_results = await self._execute_tool_calls(tool_calls, mock_mode)
 
-        response_messages: list[ChatMessageWithTools|ChatResponseWithTools] = []
+        response_messages: list[ChatMessageWithTools | ChatResponseWithTools] = []
 
         # Add assistant message with tool calls to history
         assistant_message: ChatMessageWithTools = response.choices[0].message
@@ -147,8 +149,15 @@ class LLMAgent:
                 "role": msg.role,
                 "content": msg.content,
                 **({"tool_call_id": msg.tool_call_id} if msg.tool_call_id else {}),
-                **({"tool_calls": [self._tool_call_to_dict(tc) for tc in msg.tool_calls]} 
-                   if msg.tool_calls else {}),
+                **(
+                    {
+                        "tool_calls": [
+                            self._tool_call_to_dict(tc) for tc in msg.tool_calls
+                        ]
+                    }
+                    if msg.tool_calls
+                    else {}
+                ),
             }
             for msg in request.messages
         ]
@@ -307,7 +316,7 @@ class LLMAgent:
             Standard response wrapped in tool-aware format.
         """
         # Convert to standard request
-        from backend.models.llm import ChatRequest, ChatMessage
+        from backend.models.llm import ChatMessage, ChatRequest
 
         standard_messages = [
             ChatMessage(role=msg.role, content=msg.content, name=msg.name)
@@ -351,7 +360,6 @@ class LLMAgent:
             usage=standard_response.usage,
         )
 
-
     def _model_supports_tools(self, model: str) -> bool:
         """Check if a model supports tool calling.
 
@@ -363,17 +371,18 @@ class LLMAgent:
         """
         # Models known to support function/tool calling
         tool_capable_models = {
-            "gpt-4", "gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo",
-            "claude-3", "claude-3.5",
+            "gpt-4",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-3.5-turbo",
+            "claude-3",
+            "claude-3.5",
             "github/gpt-4o",
         }
 
         # Check if model matches known patterns
         model_lower = model.lower()
-        return any(
-            pattern in model_lower
-            for pattern in tool_capable_models
-        )
+        return any(pattern in model_lower for pattern in tool_capable_models)
 
     def _tool_call_to_dict(self, tool_call: ToolCall) -> dict[str, Any]:
         """Convert ToolCall to dictionary format for LiteLLM.
@@ -415,13 +424,17 @@ class LLMAgent:
                             for tc in choice.message.tool_calls:
                                 if tc.id == result.tool_call_id:
                                     tool_name = tc.function.name
-                                    tool_usage[tool_name] = tool_usage.get(tool_name, 0) + 1
+                                    tool_usage[tool_name] = (
+                                        tool_usage.get(tool_name, 0) + 1
+                                    )
 
         return {
             "total_turns": total_turns,
             "total_tool_calls": total_tool_calls,
             "tool_usage": tool_usage,
-            "models_used": list(set(turn.request.model for turn in self.conversation_history)),
+            "models_used": list(
+                set(turn.request.model for turn in self.conversation_history)
+            ),
         }
 
     def clear_history(self) -> None:

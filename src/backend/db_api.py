@@ -1,12 +1,12 @@
+import json
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from functools import cache
-import json
-from typing import Iterable, Literal, Optional
+from typing import Literal
 
-from sqlmodel import Session, and_, select
 from sqlalchemy import func
 from sqlalchemy.orm import selectinload
-
+from sqlmodel import Session, and_, select
 
 from backend.config import MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
 from backend.database.models import (
@@ -21,12 +21,21 @@ from backend.database.models import (
     UserTournamentEnrollments,
 )
 from backend.evaluation import format_eval_result
-from backend.util.log import logger
-
 from backend.exceptions import NotFoundError
 from backend.llm.shim import map_chat_entries_to_messages
-from backend.models.llm import ChatEntry, ChatMessageWithTools, ChatRequest, ChatResponse, ChatResponseWithTools
-from backend.models.supplemental import ChallengeContextResponse, Message, SelectionFilter, UserInfo
+from backend.models.llm import (
+    ChatEntry,
+    ChatMessageWithTools,
+    ChatRequest,
+    ChatResponse,
+    ChatResponseWithTools,
+)
+from backend.models.supplemental import (
+    ChallengeContextResponse,
+    Message,
+    SelectionFilter,
+    UserInfo,
+)
 
 
 # Bind between sub and local user id should be persistent enough to justify
@@ -84,9 +93,9 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
     ).all()
 
     evaluations: Iterable[ChallengeEvaluations] = session.exec(
-        select(ChallengeEvaluations).join(UserChallengeContexts).where(
-            UserChallengeContexts.user_id == user.id
-        )
+        select(ChallengeEvaluations)
+        .join(UserChallengeContexts)
+        .where(UserChallengeContexts.user_id == user.id)
     ).all()
 
     assert user.id is not None, "User ID should not be None"
@@ -96,12 +105,19 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
         active_tournaments=list(active_tournaments),
         active_challenge_contexts=list(active_challenge_contexts),
         badges=list(badges),
-        eval_results=list([format_eval_result(evaluation) for evaluation in evaluations]),
+        eval_results=list(
+            [format_eval_result(evaluation) for evaluation in evaluations]
+        ),
     )
 
 
 def add_message_to_challenge(
-    session: Session, user_id: int, challenge_id: int, model: str, message: str, role: Literal["user", "assistant", "system"] = "user"
+    session: Session,
+    user_id: int,
+    challenge_id: int,
+    model: str,
+    message: str,
+    role: Literal["user", "assistant", "system"] = "user",
 ) -> int:
     """
     Add a message to the challenge context.
@@ -117,35 +133,36 @@ def add_message_to_challenge(
         )
     ).first()
 
-
     if not user_challenge_context:
         raise NotFoundError("User challenge context not found")
     user_challenge_context_id = user_challenge_context.id
     if not user_challenge_context.can_contribute:
         raise ValueError("User cannot contribute to this challenge context")
 
-
-    assert user_challenge_context.id is not None, "User challenge context ID should not be None"
-    if get_user_message_count_in_challenge_context(
+    assert user_challenge_context.id is not None, (
+        "User challenge context ID should not be None"
+    )
+    if (
+        get_user_message_count_in_challenge_context(
             session=session,
             user_challenge_context_id=user_challenge_context.id,
-        ) >= MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE:
-            raise ValueError("Maximum message count reached for this challenge.")
-
+        )
+        >= MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
+    ):
+        raise ValueError("Maximum message count reached for this challenge.")
 
     if not user_challenge_context_id:
         raise NotFoundError("User challenge context not found")
 
     chat_message: ChatMessageWithTools = ChatMessageWithTools(
-                role=role,
-                content=message
+        role=role, content=message
     )
 
     context_message: UserChallengeContextMessages = UserChallengeContextMessages(
         user_challenge_context_id=user_challenge_context_id,
-        content= chat_message.model_dump_json(),
+        content=chat_message.model_dump_json(),
         created_at=datetime.now(UTC),
-        content_type= chat_message.__class__.__name__,
+        content_type=chat_message.__class__.__name__,
         model=model,
         role=role,
         is_user_provided=True,
@@ -166,11 +183,15 @@ def add_chat_entries_to_challenge_no_checks(
     or similar to ensure the context exists and is valid.
     """
     for chat_entry in chat_entries:
-        if not isinstance(chat_entry, (ChatResponseWithTools, ChatMessageWithTools, ChatResponse)): # type: ignore[reportUnnecessaryIsInstance]
-            raise ValueError("Messages must be ChatResponseWithTools or ChatMessageWithTools")
+        if not isinstance(
+            chat_entry, (ChatResponseWithTools, ChatMessageWithTools, ChatResponse)
+        ):  # type: ignore[reportUnnecessaryIsInstance]
+            raise ValueError(
+                "Messages must be ChatResponseWithTools or ChatMessageWithTools"
+            )
         if isinstance(chat_entry, (ChatResponse, ChatResponseWithTools)):
             role: str = "assistant"
-        elif isinstance(chat_entry, ChatMessageWithTools): # type: ignore[reportUnnecessaryIsInstance]
+        elif isinstance(chat_entry, ChatMessageWithTools):  # type: ignore[reportUnnecessaryIsInstance]
             role = chat_entry.role
         else:
             raise ValueError(f"Invalid chat entry type: {type(chat_entry)}")
@@ -201,7 +222,7 @@ def get_challenge_context_response(
             )
         )
     ).first()
-    
+
     if not context:
         raise NotFoundError("User challenge context not found")
 
@@ -209,17 +230,11 @@ def get_challenge_context_response(
     assert context.challenge is not None, "Challenge should not be None"
     if context.challenge.system_prompt:
         default_messages.append(
-            Message(
-                role="system",
-                content=context.challenge.system_prompt
-            )
+            Message(role="system", content=context.challenge.system_prompt)
         )
     if context.challenge.initial_llm_prompt:
         default_messages.append(
-            Message(
-                role="assistant",
-                content=context.challenge.initial_llm_prompt
-            )
+            Message(role="assistant", content=context.challenge.initial_llm_prompt)
         )
 
     messages = session.exec(
@@ -231,11 +246,17 @@ def get_challenge_context_response(
     return ChallengeContextResponse(
         user_challenge_context=context,
         # XXX: This should not be so inefficient.
-        messages= default_messages + list(map_chat_entries_to_messages(list(_instantiate_challenge_context_messages(messages)))),
-        remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE - get_user_message_count_in_challenge_context(
-            session, context.id
+        messages=default_messages
+        + list(
+            map_chat_entries_to_messages(
+                list(_instantiate_challenge_context_messages(messages))
+            )
         ),
-        eval_result=format_eval_result(context.challenge_evaluations[0]) if context.challenge_evaluations else None,
+        remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
+        - get_user_message_count_in_challenge_context(session, context.id),
+        eval_result=format_eval_result(context.challenge_evaluations[0])
+        if context.challenge_evaluations
+        else None,
     )
 
 
@@ -339,7 +360,7 @@ def list_tournaments(
     session: Session,
     selection_filter: SelectionFilter = SelectionFilter.ACTIVE_ONLY,
     page_index: int = 0,
-    count: int = 10
+    count: int = 10,
 ) -> Iterable[Tournaments]:
     """
     List tournaments based on selection filter, pagination, and count.
@@ -387,7 +408,7 @@ def list_challenges(
     session: Session,
     tournament_id: int | None = None,
     page_index: int = 0,
-    count: int = 10
+    count: int = 10,
 ) -> Iterable[Challenges]:
     """
     List challenges based on tournament ID, pagination, and count.
@@ -400,9 +421,8 @@ def list_challenges(
     return challenges
 
 
-
 def _instantiate_challenge_context_messages(
-        challenge_context_messages: Iterable[UserChallengeContextMessages]
+    challenge_context_messages: Iterable[UserChallengeContextMessages],
 ) -> Iterable[ChatEntry]:
     """Instantiate chat entries from user challenge context messages.
 
@@ -418,10 +438,12 @@ def _instantiate_challenge_context_messages(
     Yields:
         Iterator[Iterable[ChatEntry]]: An iterator that yields chat entries based on the content type of the messages.
     """
-    challenge_context_messages = sorted(challenge_context_messages, key=lambda m: m.created_at)
+    challenge_context_messages = sorted(
+        challenge_context_messages, key=lambda m: m.created_at
+    )
     for message in challenge_context_messages:
         if message.content_type == "ChatRequest":
-            yield ChatRequest.model_validate_json(message.content) # type: ignore
+            yield ChatRequest.model_validate_json(message.content)  # type: ignore
         elif message.content_type == "ChatResponseWithTools":
             yield ChatResponseWithTools.model_validate_json(message.content)
         elif message.content_type == "ChatMessageWithTools":
@@ -432,7 +454,6 @@ def _instantiate_challenge_context_messages(
             raise ValueError(f"Unknown content type: {message.content_type}")
 
 
-
 def load_challenge_context_messages(
     session: Session, user_challenge_context_id: int
 ) -> Iterable[Message]:
@@ -440,7 +461,7 @@ def load_challenge_context_messages(
     Load all messages for a given user challenge context.
     Returns a list of UserChallengeContextMessages.
     """
-    user_challenge_context: Optional[UserChallengeContexts] = session.exec(
+    user_challenge_context: UserChallengeContexts | None = session.exec(
         select(UserChallengeContexts).where(
             UserChallengeContexts.id == user_challenge_context_id
         )
@@ -448,30 +469,33 @@ def load_challenge_context_messages(
     if not user_challenge_context:
         raise NotFoundError("User challenge context not found")
 
-
     default_messages: list[Message] = []
     assert user_challenge_context.challenge is not None, "Challenge should not be None"
     if user_challenge_context.challenge.system_prompt:
         default_messages.append(
             Message(
-                role="system",
-                content=user_challenge_context.challenge.system_prompt
+                role="system", content=user_challenge_context.challenge.system_prompt
             )
         )
     if user_challenge_context.challenge.initial_llm_prompt:
         default_messages.append(
             Message(
                 role="assistant",
-                content=user_challenge_context.challenge.initial_llm_prompt
+                content=user_challenge_context.challenge.initial_llm_prompt,
             )
         )
 
     context_messages: Iterable[UserChallengeContextMessages] = session.exec(
         select(UserChallengeContextMessages).where(
-            UserChallengeContextMessages.user_challenge_context_id == user_challenge_context_id
+            UserChallengeContextMessages.user_challenge_context_id
+            == user_challenge_context_id
         )
     ).all()
-    return default_messages + list(map_chat_entries_to_messages(list(_instantiate_challenge_context_messages(context_messages))))
+    return default_messages + list(
+        map_chat_entries_to_messages(
+            list(_instantiate_challenge_context_messages(context_messages))
+        )
+    )
 
 
 def get_user_message_count_in_challenge_context(
@@ -482,9 +506,12 @@ def get_user_message_count_in_challenge_context(
     Returns the count of messages.
     """
     count: int = session.exec(
-        select(func.count()).select_from(UserChallengeContextMessages).where(
+        select(func.count())
+        .select_from(UserChallengeContextMessages)
+        .where(
             and_(
-                UserChallengeContextMessages.user_challenge_context_id == user_challenge_context_id,
+                UserChallengeContextMessages.user_challenge_context_id
+                == user_challenge_context_id,
                 UserChallengeContextMessages.role == "user",
             )
         )
@@ -492,9 +519,7 @@ def get_user_message_count_in_challenge_context(
     return count
 
 
-def get_challenge_tools(
-    session: Session, challenge_id: int
-) -> Optional[list[str]]:
+def get_challenge_tools(session: Session, challenge_id: int) -> list[str] | None:
     """
     Get the list of tools available for a given challenge.
     Returns a list of tool names.
@@ -502,6 +527,6 @@ def get_challenge_tools(
     challenge = session.get(Challenges, challenge_id)
     if not challenge:
         raise NotFoundError("Challenge not found")
-    
+
     # Assuming tools are stored in a related model or as a JSON field
     return json.loads(challenge.required_tools) if challenge.required_tools else None

@@ -3,7 +3,7 @@
 import os
 import time
 from datetime import UTC, datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
@@ -12,6 +12,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlmodel import Session, select
 from supabase import Client, create_client
 
+import backend.db_api as db_api
+import backend.evaluation as evaluation
 from backend.config import MAX_MESSAGE_LENGTH, MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
 from backend.database.connection import get_db
 from backend.database.models import (
@@ -22,12 +24,19 @@ from backend.database.models import (
     UserChallengeContexts,
     Users,
 )
-from backend.db_api import add_chat_entries_to_challenge_no_checks, ensure_user_exists, get_user_info
-import backend.db_api as db_api
+from backend.db_api import (
+    add_chat_entries_to_challenge_no_checks,
+    ensure_user_exists,
+    get_user_info,
+)
 from backend.exceptions import NotFoundError
 from backend.llm.client import LLMClient
-import backend.evaluation as evaluation
-from backend.llm.shim import DEFAULT_CHAT_COMPLETION_MODEL, map_chat_entries_to_messages, send_shim_request, send_shim_request_with_tools
+from backend.llm.shim import (
+    DEFAULT_CHAT_COMPLETION_MODEL,
+    map_chat_entries_to_messages,
+    send_shim_request,
+    send_shim_request_with_tools,
+)
 from backend.models.evaluation import EvalResult
 from backend.models.llm import (
     ChatEntry,
@@ -36,7 +45,16 @@ from backend.models.llm import (
     LLMHealthStatus,
     ModelsResponse,
 )
-from backend.models.supplemental import ChallengeContextLLMResponse, ChallengeContextResponse, ChallengesPublic, Message, SelectionFilter, UserInfo
+from backend.models.supplemental import (
+    ChallengeContextLLMResponse,
+    ChallengeContextResponse,
+    ChallengesPublic,
+    Message,
+    MessageContainer,
+    MessageTree,
+    SelectionFilter,
+    UserInfo,
+)
 from backend.util.log import logger
 
 # Initialize FastAPI
@@ -47,7 +65,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # Your local frontend
-        "https://trustbuilder-ai.github.io"],  # GitHub Pages Frontend
+        "https://trustbuilder-ai.github.io",
+    ],  # GitHub Pages Frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -209,7 +228,7 @@ async def list_tournaments(
         session=db,
         selection_filter=selection_filter,
         page_index=page_index,
-        count=count
+        count=count,
     )
 
 
@@ -271,16 +290,20 @@ async def list_challenges(
     db: Session = Depends(get_db),
 ):
     """List challenges with filtering"""
-    challenges: list[Challenges] = list(db_api.list_challenges(
-        session=db,
-        tournament_id=tournament_id,
-        page_index=page_index,
-        count=count
-    ))
-    return [ChallengesPublic(
+    challenges: list[Challenges] = list(
+        db_api.list_challenges(
+            session=db, tournament_id=tournament_id, page_index=page_index, count=count
+        )
+    )
+    return [
+        ChallengesPublic(
             challenge=challenge,
-            tournament_name=challenge.tournament.name if challenge.tournament else "No Tournament"
-        ) for challenge in challenges]
+            tournament_name=challenge.tournament.name
+            if challenge.tournament
+            else "No Tournament",
+        )
+        for challenge in challenges
+    ]
 
 
 # start challenge route
@@ -306,7 +329,9 @@ async def start_challenge(
         assert challenge.id is not None, "Challenge ID should not be None"
         return db_api.start_challenge(db, user.id, challenge.id)
     except ValueError as e:
-        logger.error(f"Failed to start challenge {challenge_id} for user {user.id}: {e}")
+        logger.error(
+            f"Failed to start challenge {challenge_id} for user {user.id}: {e}"
+        )
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -341,31 +366,34 @@ async def add_message_to_challenge(
             message=message,
             role=role,
         )
-        context_messages: list[Message] = list(db_api.load_challenge_context_messages(
-            session=db,
-            user_challenge_context_id=user_challenge_context_id,
-        ))
+        context_messages: list[Message] = list(
+            db_api.load_challenge_context_messages(
+                session=db,
+                user_challenge_context_id=user_challenge_context_id,
+            )
+        )
 
         if solicit_llm_response:
             # XXXXXX TODO: add LLM contexts.
             # Optionally trigger LLM response generation
             # This could be an async task or direct call depending on your architecture
-            challenge_tools: Optional[list[str]] = db_api.get_challenge_tools(
+            challenge_tools: list[str] | None = db_api.get_challenge_tools(
                 session=db, challenge_id=challenge_id
             )
             chat_entry_list: list[ChatEntry] = []
             if challenge_tools:
-                chat_entry_list.extend(await send_shim_request_with_tools(
-                    message=message,
-                    tools=challenge_tools,
-                    context=context_messages,
-                    role=role,
-                ))
+                chat_entry_list.extend(
+                    await send_shim_request_with_tools(
+                        message=message,
+                        tools=challenge_tools,
+                        context=context_messages,
+                        role=role,
+                    )
+                )
             else:
                 chat_entry_list.append(
                     await send_shim_request(
-                        message=message, role=role,
-                        context=context_messages
+                        message=message, role=role, context=context_messages
                     )
                 )
             add_chat_entries_to_challenge_no_checks(
@@ -374,7 +402,8 @@ async def add_message_to_challenge(
                 chat_entries=chat_entry_list,
             )
             return ChallengeContextLLMResponse(
-                remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE - db_api.get_user_message_count_in_challenge_context(
+                remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
+                - db_api.get_user_message_count_in_challenge_context(
                     session=db,
                     user_challenge_context_id=user_challenge_context_id,
                 ),
@@ -399,10 +428,14 @@ async def evaluate_challenge_context(
     try:
         return await evaluation.evaluate_challenge_context(
             session=db,
-            challenge_context_id=db.exec(select(UserChallengeContexts).where(
-                UserChallengeContexts.user_id == user.id,
-                UserChallengeContexts.challenge_id == challenge_id,
-            )).first().id # type: ignore
+            challenge_context_id=db.exec(
+                select(UserChallengeContexts).where(
+                    UserChallengeContexts.user_id == user.id,
+                    UserChallengeContexts.challenge_id == challenge_id,
+                )
+            )
+            .first()
+            .id,  # type: ignore
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Challenge not found")
@@ -420,9 +453,7 @@ async def join_tournament(
     assert user.id is not None, "User ID should not be None"
     # Check if tournament exists and is active.
     try:
-        db_api.join_tournament(
-            db, user.id, tournament_id
-        )
+        db_api.join_tournament(db, user.id, tournament_id)
         return {"message": "Successfully joined tournament"}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -459,6 +490,50 @@ async def get_challenge_context(
         )
     except NotFoundError:
         raise HTTPException(status_code=404, detail="Challenge not found")
+
+
+@app.get("/message_tree/{user_challenge_context_id}", response_model=MessageTree)
+async def get_message_tree(
+    user_challenge_context_id: int,
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
+    """Get message tree for a user challenge context.
+
+    TEMPORARY ROUTE: This endpoint is intended solely for OpenAPI type generation
+    from FastAPI and should be removed once the actual message tree functionality
+    is implemented in the appropriate service layer.
+
+    Currently returns dummy data for type generation purposes only.
+
+    Args:
+        user_challenge_context_id: The ID of the user challenge context
+        current_user: Current authenticated user from JWT token
+
+    Returns:
+        MessageTree: A dummy list of MessageContainer objects for OpenAPI generation
+    """
+    # Return dummy MessageTree data for OpenAPI type generation
+    dummy_tree: MessageTree = [
+        MessageContainer(
+            id=1,
+            parent_message_id=None,
+            message=Message(
+                role="user",
+                content="Dummy message for OpenAPI type generation",
+                is_tool_call=False,
+            ),
+        ),
+        MessageContainer(
+            id=2,
+            parent_message_id=1,
+            message=Message(
+                role="assistant",
+                content="Dummy response for OpenAPI type generation",
+                is_tool_call=False,
+            ),
+        ),
+    ]
+    return dummy_tree
 
 
 # LLM endpoints

@@ -4,7 +4,7 @@ This module defines the data models used for LLM API requests and responses,
 following the OpenAI ChatCompletions API format for consistency.
 """
 
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -224,7 +224,7 @@ class ChatMessageWithTools(ChatMessage):
         tool_call_id: ID of the tool call this message is responding to.
     """
 
-    role: Literal["user", "assistant", "system", "tool"] # type: ignore
+    role: Literal["user", "assistant", "system", "tool"]  # type: ignore
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
 
@@ -237,9 +237,9 @@ class ChatRequestWithTools(ChatRequest):
         tool_choice: How the model should choose tools ('auto', 'none', or specific).
     """
 
-    messages: list[ChatMessageWithTools] # type: ignore
+    messages: list[ChatMessageWithTools]  # type: ignore
     tools: list[ToolFunction] | None = None
-    tool_choice: Union[Literal["auto", "none"], dict[str, str]] | None = None
+    tool_choice: Literal["auto", "none"] | dict[str, str] | None = None
 
 
 class ChatChoiceWithTools(ChatChoice):
@@ -249,7 +249,7 @@ class ChatChoiceWithTools(ChatChoice):
         message: The message with potential tool calls.
     """
 
-    message: ChatMessageWithTools # type: ignore
+    message: ChatMessageWithTools  # type: ignore
 
 
 class ChatResponseWithTools(ChatResponse):
@@ -259,7 +259,7 @@ class ChatResponseWithTools(ChatResponse):
         choices: List of completion choices with tool support.
     """
 
-    choices: list[ChatChoiceWithTools] # type: ignore
+    choices: list[ChatChoiceWithTools]  # type: ignore
 
 
 class ToolExecutionResult(BaseModel):
@@ -288,7 +288,6 @@ class ConversationTurn(BaseModel):
     request: ChatRequestWithTools
     response: ChatResponseWithTools
     tool_results: list[ToolExecutionResult] | None = None
-
 
 
 ChatEntry = ChatMessage | ChatResponse | ChatMessageWithTools | ChatResponseWithTools

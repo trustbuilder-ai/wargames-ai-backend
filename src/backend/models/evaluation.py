@@ -5,7 +5,7 @@ and the EvalResult model for encapsulating the evaluation outcome.
 """
 
 from enum import StrEnum
-from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -19,6 +19,6 @@ class EvalStatus(StrEnum):
 class EvalResult(BaseModel):
     # this is what's sent to the user and wrapped in the openai
     # evaluation.
-    reason: Optional[str] = None
+    reason: str | None = None
     status: EvalStatus
-    challenge_id: Optional[int] = None
+    challenge_id: int | None = None
