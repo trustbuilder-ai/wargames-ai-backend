@@ -14,18 +14,18 @@ from supabase import Client, create_client
 
 import backend.db_api as db_api
 import backend.evaluation as evaluation
-from backend.config import MAX_MESSAGE_LENGTH, MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
+from backend.config import MAX_MESSAGE_LENGTH, MAX_USER_MESSAGE_COUNT_FOR_CHAT_TEMPLATE
 from backend.database.connection import get_db
 from backend.database.models import (
     Badges,
-    Challenges,
-    Tournaments,
+    ChatTemplate,
+    ChatTemplateContainer,
     UserBadges,
-    UserChallengeContexts,
+    UserChatTemplateContext,
     Users,
 )
 from backend.db_api import (
-    add_chat_entries_to_challenge_no_checks,
+    add_chat_entries_to_chat_template_no_checks,
     ensure_user_exists,
     get_user_info,
 )
@@ -46,9 +46,9 @@ from backend.models.llm import (
     ModelsResponse,
 )
 from backend.models.supplemental import (
-    ChallengeContextLLMResponse,
-    ChallengeContextResponse,
-    ChallengesPublic,
+    ChatTemplateContextLLMResponse,
+    ChatTemplateContextResponse,
+    ChatTemplatesPublic,
     Message,
     MessageContainer,
     MessageTree,
@@ -215,8 +215,8 @@ async def get_current_user_full(
     return user_data
 
 
-@app.get("/tournaments", response_model=list[Tournaments])
-async def list_tournaments(
+@app.get("/chat_template_containers", response_model=list[ChatTemplateContainer])
+async def list_chat_template_containers(
     selection_filter: SelectionFilter = SelectionFilter.ACTIVE_ONLY,
     page_index: int = 0,
     count: int = 10,
@@ -224,7 +224,7 @@ async def list_tournaments(
     db: Session = Depends(get_db),
 ):
     """List tournaments with filtering"""
-    return db_api.list_tournaments(
+    return db_api.list_chat_template_containers(
         session=db,
         selection_filter=selection_filter,
         page_index=page_index,
@@ -232,19 +232,17 @@ async def list_tournaments(
     )
 
 
-@app.get("/tournaments/{tournament_id}", response_model=Tournaments)
-async def get_tournament(
-    tournament_id: int,
+@app.get("/chat_template_containers/{chat_template_container_id}", response_model=ChatTemplateContainer)
+async def get_chat_template_container(
+    chat_template_container_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get a specific tournament"""
-    # Example: tournament = db.query(Tournaments)
-    #   .filter(Tournaments.id == tournament_id).first()
-    tournament = db.get(Tournaments, tournament_id)
-    if tournament:
-        return tournament
-    raise HTTPException(status_code=404, detail="Tournament not found")
+    """Get a specific chat template container"""
+    container = db.get(ChatTemplateContainer, chat_template_container_id)
+    if container:
+        return container
+    raise HTTPException(status_code=404, detail="Chat template container not found")
 
 
 @app.get("/badges", response_model=list[Badges])
@@ -282,38 +280,38 @@ async def get_badge(
     raise HTTPException(status_code=404, detail="Badge not found")
 
 
-@app.get("/challenges", response_model=list[ChallengesPublic])
-async def list_challenges(
-    tournament_id: int | None = None,
+@app.get("/chat_templates", response_model=list[ChatTemplatesPublic])
+async def list_chat_templates(
+    chat_template_container_id: int | None = None,
     page_index: int = 0,
     count: int = 10,
     db: Session = Depends(get_db),
 ):
-    """List challenges with filtering"""
-    challenges: list[Challenges] = list(
-        db_api.list_challenges(
-            session=db, tournament_id=tournament_id, page_index=page_index, count=count
+    """List chat templates with filtering"""
+    templates: list[ChatTemplate] = list(
+        db_api.list_chat_templates(
+            session=db, chat_template_container_id=chat_template_container_id, page_index=page_index, count=count
         )
     )
     return [
-        ChallengesPublic(
-            challenge=challenge,
-            tournament_name=challenge.tournament.name
-            if challenge.tournament
-            else "No Tournament",
+        ChatTemplatesPublic(
+            chat_template=template,
+            container_name=template.chat_template_container.name
+            if template.chat_template_container
+            else "No Container",
         )
-        for challenge in challenges
+        for template in templates
     ]
 
 
-# start challenge route
-@app.post("/challenges/{challenge_id}/start", response_model=UserChallengeContexts)
-async def start_challenge(
-    challenge_id: int,
+# start chat template route
+@app.post("/chat_templates/{chat_template_id}/start", response_model=UserChatTemplateContext)
+async def start_chat_template(
+    chat_template_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Start a challenge for the current user"""
+    """Start a chat template for the current user"""
     # Get the internal user id from sub_id
     user: Users = ensure_user_exists(db, current_user["id"])
 
@@ -321,34 +319,34 @@ async def start_challenge(
     if user.id is None:
         raise HTTPException(status_code=500, detail="User ID not found")
 
-    challenge = db.get(Challenges, challenge_id)
-    if not challenge:
-        raise HTTPException(status_code=404, detail="Challenge not found")
+    template = db.get(ChatTemplate, template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Chat template not found")
 
     try:
-        assert challenge.id is not None, "Challenge ID should not be None"
-        return db_api.start_challenge(db, user.id, challenge.id)
+        assert template.id is not None, "Template ID should not be None"
+        return db_api.start_chat_template(db, user.id, template.id)
     except ValueError as e:
         logger.error(
-            f"Failed to start challenge {challenge_id} for user {user.id}: {e}"
+            f"Failed to start chat template {chat_template_id} for user {user.id}: {e}"
         )
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# Route for submitting a message to a challenge agent
+# Route for submitting a message to a chat template agent
 @app.post(
-    "/challenges/{challenge_id}/add_message",
-    response_model=ChallengeContextLLMResponse,
+    "/chat_templates/{chat_template_id}/add_message",
+    response_model=ChatTemplateContextLLMResponse,
 )
-async def add_message_to_challenge(
-    challenge_id: int,
+async def add_message_to_chat_template(
+    chat_template_id: int,
     message: str,
     role: Literal["user", "assistant", "system"] = "user",
     current_user: dict[str, Any] = Depends(get_current_user),
     solicit_llm_response: bool = True,
     db: Session = Depends(get_db),
 ):
-    """Submit a message to the challenge agent"""
+    """Submit a message to the chat template agent"""
     try:
         if len(message) > MAX_MESSAGE_LENGTH:
             raise HTTPException(
@@ -358,18 +356,18 @@ async def add_message_to_challenge(
         user: Users = ensure_user_exists(db, current_user["id"])
         assert user.id is not None, "User ID should not be None"
 
-        user_challenge_context_id: int = db_api.add_message_to_challenge(
+        user_chat_template_context_id: int = db_api.add_message_to_chat_template(
             session=db,
             user_id=user.id,
-            challenge_id=challenge_id,
+            chat_template_id=chat_template_id,
             model=DEFAULT_CHAT_COMPLETION_MODEL,
             message=message,
             role=role,
         )
         context_messages: list[Message] = list(
-            db_api.load_challenge_context_messages(
+            db_api.load_chat_template_context_messages(
                 session=db,
-                user_challenge_context_id=user_challenge_context_id,
+                user_chat_template_context_id=user_chat_template_context_id,
             )
         )
 
@@ -377,15 +375,15 @@ async def add_message_to_challenge(
             # XXXXXX TODO: add LLM contexts.
             # Optionally trigger LLM response generation
             # This could be an async task or direct call depending on your architecture
-            challenge_tools: list[str] | None = db_api.get_challenge_tools(
-                session=db, challenge_id=challenge_id
+            template_tools: list[str] | None = db_api.get_chat_template_tools(
+                session=db, chat_template_id=chat_template_id
             )
             chat_entry_list: list[ChatEntry] = []
-            if challenge_tools:
+            if template_tools:
                 chat_entry_list.extend(
                     await send_shim_request_with_tools(
                         message=message,
-                        tools=challenge_tools,
+                        tools=template_tools,
                         context=context_messages,
                         role=role,
                     )
@@ -396,16 +394,16 @@ async def add_message_to_challenge(
                         message=message, role=role, context=context_messages
                     )
                 )
-            add_chat_entries_to_challenge_no_checks(
+            add_chat_entries_to_chat_template_no_checks(
                 session=db,
-                user_challenge_context_id=user_challenge_context_id,
+                user_chat_template_context_id=user_chat_template_context_id,
                 chat_entries=chat_entry_list,
             )
-            return ChallengeContextLLMResponse(
-                remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
-                - db_api.get_user_message_count_in_challenge_context(
+            return ChatTemplateContextLLMResponse(
+                remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHAT_TEMPLATE
+                - db_api.get_user_message_count_in_chat_template_context(
                     session=db,
-                    user_challenge_context_id=user_challenge_context_id,
+                    user_chat_template_context_id=user_chat_template_context_id,
                 ),
                 messages=list(map_chat_entries_to_messages(chat_entry_list)),
             )
@@ -415,50 +413,32 @@ async def add_message_to_challenge(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/challenges/{challenge_id}/evaluate", response_model=EvalResult)
-async def evaluate_challenge_context(
-    challenge_id: int,
+@app.get("/chat_templates/{chat_template_id}/evaluate", response_model=EvalResult)
+async def evaluate_chat_template_context(
+    chat_template_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Evaluate the challenge context"""
+    """Evaluate the chat template context"""
     user: Users = ensure_user_exists(db, current_user["id"])
     assert user.id is not None, "User ID should not be None"
-    # Get the challenge context for the user
+    # Get the chat template context for the user
     try:
-        return await evaluation.evaluate_challenge_context(
+        return await evaluation.evaluate_chat_template_context(
             session=db,
-            challenge_context_id=db.exec(
-                select(UserChallengeContexts).where(
-                    UserChallengeContexts.user_id == user.id,
-                    UserChallengeContexts.challenge_id == challenge_id,
+            chat_template_context_id=db.exec(
+                select(UserChatTemplateContext).where(
+                    UserChatTemplateContext.user_id == user.id,
+                    UserChatTemplateContext.chat_template_id == chat_template_id,
                 )
             )
             .first()
             .id,  # type: ignore
         )
     except NotFoundError:
-        raise HTTPException(status_code=404, detail="Challenge not found")
+        raise HTTPException(status_code=404, detail="Chat template not found")
 
 
-@app.post("/tournaments/{tournament_id}/join")
-async def join_tournament(
-    tournament_id: int,
-    current_user: dict[str, Any] = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Join a tournament"""
-
-    user: Users = ensure_user_exists(db, current_user["id"])
-    assert user.id is not None, "User ID should not be None"
-    # Check if tournament exists and is active.
-    try:
-        db_api.join_tournament(db, user.id, tournament_id)
-        return {"message": "Successfully joined tournament"}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e.message))
 
 
 # Route for getting user info
@@ -471,33 +451,33 @@ async def get_current_user_info(
     return get_user_info(db, current_user["id"])
 
 
-@app.get("/challenges/{challenge_id}/context", response_model=ChallengeContextResponse)
-async def get_challenge_context(
-    challenge_id: int,
+@app.get("/chat_templates/{chat_template_id}/context", response_model=ChatTemplateContextResponse)
+async def get_chat_template_context(
+    chat_template_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get challenge context for current user"""
+    """Get chat template context for current user"""
     # Get the internal user id from sub_id
     user = ensure_user_exists(db, current_user["id"])
 
-    # Get the challenge context for the user
+    # Get the chat template context for the user
     try:
-        return db_api.get_challenge_context_response(
+        return db_api.get_chat_template_context_response(
             session=db,
             user_id=user.id,
-            challenge_id=challenge_id,
+            chat_template_id=chat_template_id,
         )
     except NotFoundError:
-        raise HTTPException(status_code=404, detail="Challenge not found")
+        raise HTTPException(status_code=404, detail="Chat template not found")
 
 
-@app.get("/message_tree/{user_challenge_context_id}", response_model=MessageTree)
+@app.get("/message_tree/{user_chat_template_context_id}", response_model=MessageTree)
 async def get_message_tree(
-    user_challenge_context_id: int,
+    user_chat_template_context_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
 ):
-    """Get message tree for a user challenge context.
+    """Get message tree for a user chat template context.
 
     TEMPORARY ROUTE: This endpoint is intended solely for OpenAPI type generation
     from FastAPI and should be removed once the actual message tree functionality
@@ -506,7 +486,7 @@ async def get_message_tree(
     Currently returns dummy data for type generation purposes only.
 
     Args:
-        user_challenge_context_id: The ID of the user challenge context
+        user_chat_template_context_id: The ID of the user chat template context
         current_user: Current authenticated user from JWT token
 
     Returns:

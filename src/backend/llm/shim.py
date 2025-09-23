@@ -1,5 +1,5 @@
 """
-This file is the sole LLM access point for the Challenge API. The intent of
+This file is the sole LLM access point for the Chat Template API. The intent of
 which is to provide a standard interface for the LLM client and agentic
 interactions.
 """

@@ -1,7 +1,7 @@
 """
-This module contains functions for evaluating challenge contexts in the backend.
+This module contains functions for evaluating chat template contexts in the backend.
 It includes functions to get the evaluation result from the LLM, format the evaluation result,
-and evaluate a challenge context based on the messages and criteria provided.
+and evaluate a chat template context based on the messages and criteria provided.
 """
 
 import json
@@ -13,8 +13,8 @@ from backend import db_api
 from backend.database.locking import Locker
 from backend.database.models import (
     ChallengeEvaluations,
-    Challenges,
-    UserChallengeContexts,
+    ChatTemplate,
+    UserChatTemplateContext,
 )
 from backend.exceptions import EvaluationDecodeError, NotFoundError
 from backend.llm.client import LLMClient
@@ -40,7 +40,7 @@ whether the user has successfully directed the AI such that the LLM output fulfi
 OUTPUT FORMAT:
 Answer exclusively in a JSON format with the following fields:
 {
-    "success": <0 or 1, indicating whether the user has successfully completed the challenge>,
+    "success": <0 or 1, indicating whether the user has successfully completed the chat template>,
     "reason": <string explaining the evaluation result>,
 }
 
@@ -66,34 +66,34 @@ CONVERSATION:
 """
 
 
-def _set_challenge_context_processed(session: Session, challenge_context_id: int):
+def _set_chat_template_context_processed(session: Session, chat_template_context_id: int) -> UserChatTemplateContext:
     """
-    Set the challenge context as processed and update the evaluation status.
+    Set the chat template context as processed and update the evaluation status.
     This function should be called within a lock to prevent race conditions.
     """
     # Reload the evaluation to ensure we have the latest state
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.user_challenge_context_id == challenge_context_id
+            ChallengeEvaluations.user_chat_template_context_id == chat_template_context_id
         )
     ).first()
-    assert evaluation, "Evaluation must exist for challenge context"
+    assert evaluation, "Evaluation must exist for chat template context"
     if evaluation.processed_at is not None:
         raise ValueError("Evaluation race condition")
     logger.info(
-        f"Setting challenge context {challenge_context_id} as processed. Evaluation ID: {evaluation.id}"
+        f"Setting chat template context {chat_template_context_id} as processed. Evaluation ID: {evaluation.id}"
     )
     evaluation.processed_at = datetime.now(UTC)
 
-    assert evaluation.user_challenge_context, (
-        "User challenge context must exist for evaluation"
+    assert evaluation.user_chat_template_context, (
+        "User chat template context must exist for evaluation"
     )
-    evaluation.user_challenge_context.can_contribute = False
+    evaluation.user_chat_template_context.can_contribute = False
 
     session.add(evaluation)
-    session.add(evaluation.user_challenge_context)
+    session.add(evaluation.user_chat_template_context)
     session.commit()
-    return evaluation.user_challenge_context
+    return evaluation.user_chat_template_context
 
 
 async def get_raw_llm_evaluation(
@@ -141,18 +141,18 @@ async def get_raw_llm_evaluation(
         raise EvaluationDecodeError("Unknown error decoding evaluation result") from e
 
 
-def get_called_tools(challenge_context: UserChallengeContexts) -> list[str]:
+def get_called_tools(chat_template_context: UserChatTemplateContext) -> list[str]:
     """
-    Get the list of tools called in the challenge context.
-    This function assumes that the challenge context has a 'tool_calls' field
+    Get the list of tools called in the chat template context.
+    This function assumes that the chat template context has a 'tool_calls' field
     that contains a JSON formatted list of tool names.
     """
     messages: list[Message] = list(
         map_chat_entries_to_messages(
             list(
-                db_api._instantiate_challenge_context_messages(
+                db_api._instantiate_chat_template_context_messages(
                     list(  # type: ignore
-                        challenge_context.user_challenge_context_messages
+                        chat_template_context.user_chat_template_context_messages
                     )
                 )
             )
@@ -171,25 +171,25 @@ def get_called_tools(challenge_context: UserChallengeContexts) -> list[str]:
 
 
 async def _get_evaluation_result(
-    session: Session, challenge_context: UserChallengeContexts
+    session: Session, chat_template_context: UserChatTemplateContext
 ) -> EvalResult:
-    # This challenge context does not have the messages in a user-available format by
+    # This chat template context does not have the messages in a user-available format by
     # default
-    challenge: Challenges | None = challenge_context.challenge
-    assert challenge, "Challenge must exist for evaluation."
-    assert challenge.id, "Challenge must have an ID for evaluation."
+    template: ChatTemplate | None = chat_template_context.chat_template
+    assert template, "Chat template must exist for evaluation."
+    assert template.id, "Chat template must have an ID for evaluation."
 
     status: EvalStatus = EvalStatus.NOT_EVALUATED
     reason: str = "Unknown"
-    required_tool_calls: list[str] | None = db_api.get_challenge_tools(
-        session, challenge.id
+    required_tool_calls: list[str] | None = db_api.get_chat_template_tools(
+        session, template.id
     )
-    if not challenge.evaluation_prompt and not required_tool_calls:
+    if not template.evaluation_prompt and not required_tool_calls:
         raise ValueError(
-            "Invalid challenge specification. Must have one of or both of evaluation_prompt and required tools."
+            "Invalid chat template specification. Must have one of or both of evaluation_prompt and required tools."
         )
     if required_tool_calls:
-        if set(required_tool_calls) - set(get_called_tools(challenge_context)):
+        if set(required_tool_calls) - set(get_called_tools(chat_template_context)):
             status = EvalStatus.FAILED
             reason = "Not all tools called"
         else:
@@ -197,23 +197,23 @@ async def _get_evaluation_result(
             reason = "All tools called."
 
     if (
-        challenge.evaluation_prompt
-        and challenge.evaluation_prompt.strip()
+        template.evaluation_prompt
+        and template.evaluation_prompt.strip()
         and status != EvalStatus.FAILED
     ):
         messages: list[Message] = list(
             map_chat_entries_to_messages(
                 list(
-                    db_api._instantiate_challenge_context_messages(
+                    db_api._instantiate_chat_template_context_messages(
                         list(  # type: ignore
-                            challenge_context.user_challenge_context_messages
+                            chat_template_context.user_chat_template_context_messages
                         )
                     )
                 )
             )
         )
         evaluation_result: dict[str, str | int] = await get_raw_llm_evaluation(
-            challenge.evaluation_prompt, messages
+            template.evaluation_prompt, messages
         )
         if evaluation_result["success"]:
             status = EvalStatus.SUCCEEDED
@@ -228,8 +228,8 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
     """
     Format the evaluation result into a standard EvalResult object.
     """
-    assert evaluation.user_challenge_context, (
-        "User challenge context must exist for evaluation"
+    assert evaluation.user_chat_template_context, (
+        "User chat template context must exist for evaluation"
     )
     return EvalResult(
         reason=evaluation.result_text or "No result text",
@@ -244,22 +244,22 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
                 else EvalStatus.NOT_EVALUATED
             )
         ),
-        challenge_id=evaluation.user_challenge_context.challenge_id,
+        chat_template_id=evaluation.user_chat_template_context.chat_template_id,
     )
 
 
-async def evaluate_challenge_context(
-    session: Session, challenge_context_id: int
+async def evaluate_chat_template_context(
+    session: Session, chat_template_context_id: int
 ) -> EvalResult:
     """
-    Evaluate a challenge context by processing its messages and criteria.
-    This function retrieves the challenge context, checks if it has been processed,
+    Evaluate a chat template context by processing its messages and criteria.
+    This function retrieves the chat template context, checks if it has been processed,
     and if not, processes it to get the evaluation result.
     """
-    logger.info(f"Evaluating challenge context with ID: {challenge_context_id}")
+    logger.info(f"Evaluating chat template context with ID: {chat_template_context_id}")
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.user_challenge_context_id == challenge_context_id
+            ChallengeEvaluations.user_chat_template_context_id == chat_template_context_id
         )
     ).first()
     if not evaluation:
@@ -267,13 +267,13 @@ async def evaluate_challenge_context(
     if evaluation.processed_at is not None:
         return format_eval_result(evaluation)
 
-    with Locker(session).acquire_lock(str(challenge_context_id)):
-        challenge_context: UserChallengeContexts = _set_challenge_context_processed(
-            session, challenge_context_id
+    with Locker(session).acquire_lock(str(chat_template_context_id)):
+        chat_template_context: UserChatTemplateContext = _set_chat_template_context_processed(
+            session, chat_template_context_id
         )
 
-    session.refresh(challenge_context)
-    # Format the challenge context for evaluation.
+    session.refresh(chat_template_context)
+    # Format the chat template context for evaluation.
     result_text: str = "not processed"
     result: str | None = None
 
@@ -281,7 +281,7 @@ async def evaluate_challenge_context(
 
     try:
         eval_result: EvalResult = await _get_evaluation_result(
-            session, challenge_context
+            session, chat_template_context
         )
         result_text = eval_result.reason or "Unknown reason"
         assert eval_result.status in [

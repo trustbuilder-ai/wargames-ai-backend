@@ -4,21 +4,20 @@ from datetime import UTC, datetime
 from functools import cache
 from typing import Literal
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import selectinload
 from sqlmodel import Session, and_, select
 
-from backend.config import MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
+from backend.config import MAX_USER_MESSAGE_COUNT_FOR_CHAT_TEMPLATE
 from backend.database.models import (
     Badges,
     ChallengeEvaluations,
-    Challenges,
-    Tournaments,
+    ChatTemplate,
+    ChatTemplateContainer,
     UserBadges,
-    UserChallengeContextMessages,
-    UserChallengeContexts,
+    UserChatTemplateContextMessages,
+    UserChatTemplateContext,
     Users,
-    UserTournamentEnrollments,
 )
 from backend.evaluation import format_eval_result
 from backend.exceptions import NotFoundError
@@ -31,8 +30,9 @@ from backend.models.llm import (
     ChatResponseWithTools,
 )
 from backend.models.supplemental import (
-    ChallengeContextResponse,
+    ChatTemplateContextResponse,
     Message,
+    MessageContainer,
     SelectionFilter,
     UserInfo,
 )
@@ -63,26 +63,25 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
     """
     now = datetime.now(UTC)
     user: Users = ensure_user_exists(session, user_sub)
-    active_tournaments = session.exec(
-        select(Tournaments)
-        .join(UserTournamentEnrollments)
+    # Get all active chat template containers (no user enrollment filtering since that table is removed)
+    active_containers = session.exec(
+        select(ChatTemplateContainer)
         .where(
             and_(
-                UserTournamentEnrollments.user_id == user.id,
-                Tournaments.start_date <= now,
-                Tournaments.end_date >= now,
+                ChatTemplateContainer.start_date <= now,
+                ChatTemplateContainer.end_date >= now,
             )
         )
     ).all()
 
-    active_challenge_contexts = session.exec(
-        select(UserChallengeContexts)
-        .join(Challenges)
+    active_chat_template_contexts = session.exec(
+        select(UserChatTemplateContext)
+        .join(ChatTemplate)
         .where(
             and_(
-                UserChallengeContexts.user_id == user.id,
-                Challenges.tournament_id.in_(
-                    [tournament.id for tournament in active_tournaments]
+                UserChatTemplateContext.user_id == user.id,
+                ChatTemplate.chat_template_container_id.in_(
+                    [container.id for container in active_containers]
                 ),
             )
         )
@@ -94,16 +93,16 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
 
     evaluations: Iterable[ChallengeEvaluations] = session.exec(
         select(ChallengeEvaluations)
-        .join(UserChallengeContexts)
-        .where(UserChallengeContexts.user_id == user.id)
+        .join(UserChatTemplateContext)
+        .where(UserChatTemplateContext.user_id == user.id)
     ).all()
 
     assert user.id is not None, "User ID should not be None"
     return UserInfo(
         user_id=user.id,
         email=None,  # Email is not stored in the Users model
-        active_tournaments=list(active_tournaments),
-        active_challenge_contexts=list(active_challenge_contexts),
+        active_chat_template_containers=list(active_containers),
+        active_chat_template_contexts=list(active_chat_template_contexts),
         badges=list(badges),
         eval_results=list(
             [format_eval_result(evaluation) for evaluation in evaluations]
@@ -111,55 +110,55 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
     )
 
 
-def add_message_to_challenge(
+def add_message_to_chat_template(
     session: Session,
     user_id: int,
-    challenge_id: int,
+    chat_template_id: int,
     model: str,
     message: str,
     role: Literal["user", "assistant", "system"] = "user",
 ) -> int:
     """
-    Add a message to the challenge context.
+    Add a message to the chat template context.
     """
     # Add message if it can be added to the context. It will be followed up by a processed
     # at message.
-    user_challenge_context = session.exec(
-        select(UserChallengeContexts).where(
+    user_chat_template_context = session.exec(
+        select(UserChatTemplateContext).where(
             and_(
-                UserChallengeContexts.user_id == user_id,
-                UserChallengeContexts.challenge_id == challenge_id,
+                UserChatTemplateContext.user_id == user_id,
+                UserChatTemplateContext.chat_template_id == chat_template_id,
             )
         )
     ).first()
 
-    if not user_challenge_context:
-        raise NotFoundError("User challenge context not found")
-    user_challenge_context_id = user_challenge_context.id
-    if not user_challenge_context.can_contribute:
-        raise ValueError("User cannot contribute to this challenge context")
+    if not user_chat_template_context:
+        raise NotFoundError("User chat template context not found")
+    user_chat_template_context_id = user_chat_template_context.id
+    if not user_chat_template_context.can_contribute:
+        raise ValueError("User cannot contribute to this chat template context")
 
-    assert user_challenge_context.id is not None, (
-        "User challenge context ID should not be None"
+    assert user_chat_template_context.id is not None, (
+        "User chat template context ID should not be None"
     )
     if (
-        get_user_message_count_in_challenge_context(
+        get_user_message_count_in_chat_template_context(
             session=session,
-            user_challenge_context_id=user_challenge_context.id,
+            user_chat_template_context_id=user_chat_template_context.id,
         )
-        >= MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
+        >= MAX_USER_MESSAGE_COUNT_FOR_CHAT_TEMPLATE
     ):
-        raise ValueError("Maximum message count reached for this challenge.")
+        raise ValueError("Maximum message count reached for this chat template.")
 
-    if not user_challenge_context_id:
-        raise NotFoundError("User challenge context not found")
+    if not user_chat_template_context_id:
+        raise NotFoundError("User chat template context not found")
 
     chat_message: ChatMessageWithTools = ChatMessageWithTools(
         role=role, content=message
     )
 
-    context_message: UserChallengeContextMessages = UserChallengeContextMessages(
-        user_challenge_context_id=user_challenge_context_id,
+    context_message: UserChatTemplateContextMessages = UserChatTemplateContextMessages(
+        user_chat_template_context_id=user_chat_template_context_id,
         content=chat_message.model_dump_json(),
         created_at=datetime.now(UTC),
         content_type=chat_message.__class__.__name__,
@@ -169,16 +168,16 @@ def add_message_to_challenge(
     )
     session.add(context_message)
     session.commit()
-    return user_challenge_context_id
+    return user_chat_template_context_id
 
 
-def add_chat_entries_to_challenge_no_checks(
+def add_chat_entries_to_chat_template_no_checks(
     session: Session,
-    user_challenge_context_id: int,
+    user_chat_template_context_id: int,
     chat_entries: list[ChatEntry],
 ):
     """
-    Bulk add messages to a challenge context without checks.
+    Bulk add messages to a chat template context without checks.
     This assumes that the caller has already called add_message_to_challenge
     or similar to ensure the context exists and is valid.
     """
@@ -195,8 +194,8 @@ def add_chat_entries_to_challenge_no_checks(
             role = chat_entry.role
         else:
             raise ValueError(f"Invalid chat entry type: {type(chat_entry)}")
-        context_message: UserChallengeContextMessages = UserChallengeContextMessages(
-            user_challenge_context_id=user_challenge_context_id,
+        context_message: UserChatTemplateContextMessages = UserChatTemplateContextMessages(
+            user_chat_template_context_id=user_chat_template_context_id,
             content=chat_entry.model_dump_json(),
             created_at=datetime.now(UTC),
             content_type=chat_entry.__class__.__name__,
@@ -207,75 +206,69 @@ def add_chat_entries_to_challenge_no_checks(
     session.commit()
 
 
-def get_challenge_context_response(
-    session: Session, user_id: int, challenge_id: int
-) -> ChallengeContextResponse:
+def get_chat_template_context_response(
+    session: Session, user_id: int, chat_template_id: int
+) -> ChatTemplateContextResponse:
     """
-    Get the challenge context response for a user and challenge.
-    Returns the ChallengeContextResponse object.
+    Get the chat template context response for a user and chat template.
+    Returns the ChatTemplateContextResponse object.
     """
     context = session.exec(
-        select(UserChallengeContexts).where(
+        select(UserChatTemplateContext).where(
             and_(
-                UserChallengeContexts.user_id == user_id,
-                UserChallengeContexts.challenge_id == challenge_id,
+                UserChatTemplateContext.user_id == user_id,
+                UserChatTemplateContext.chat_template_id == chat_template_id,
             )
         )
     ).first()
 
     if not context:
-        raise NotFoundError("User challenge context not found")
+        raise NotFoundError("User chat template context not found")
 
     default_messages: list[Message] = []
-    assert context.challenge is not None, "Challenge should not be None"
-    if context.challenge.system_prompt:
-        default_messages.append(
-            Message(role="system", content=context.challenge.system_prompt)
-        )
-    if context.challenge.initial_llm_prompt:
-        default_messages.append(
-            Message(role="assistant", content=context.challenge.initial_llm_prompt)
-        )
+    assert context.chat_template is not None, "Chat template should not be None"
+    # Extract initial messages from message_tree using Pydantic models
+    if context.chat_template.message_tree:
+        for node_data in context.chat_template.message_tree:
+            container = MessageContainer.model_validate(node_data)
+            default_messages.append(container.message)
 
     messages = session.exec(
-        select(UserChallengeContextMessages).where(
-            UserChallengeContextMessages.user_challenge_context_id == context.id
+        select(UserChatTemplateContextMessages).where(
+            UserChatTemplateContextMessages.user_chat_template_context_id == context.id
         )
     ).all()
-    assert context.id is not None, "User challenge context ID should not be None"
-    return ChallengeContextResponse(
-        user_challenge_context=context,
+    assert context.id is not None, "User chat template context ID should not be None"
+    return ChatTemplateContextResponse(
+        user_chat_template_context=context,
         # XXX: This should not be so inefficient.
         messages=default_messages
         + list(
             map_chat_entries_to_messages(
-                list(_instantiate_challenge_context_messages(messages))
+                list(_instantiate_chat_template_context_messages(messages))
             )
         ),
-        remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHALLENGE
-        - get_user_message_count_in_challenge_context(session, context.id),
+        remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHAT_TEMPLATE
+        - get_user_message_count_in_chat_template_context(session, context.id),
         eval_result=format_eval_result(context.challenge_evaluations[0])
         if context.challenge_evaluations
         else None,
     )
 
 
-def start_challenge(
-    session: Session, user_id: int, challenge_id: int
-) -> UserChallengeContexts:
+def start_chat_template(
+    session: Session, user_id: int, chat_template_id: int
+) -> UserChatTemplateContext:
     """
-    Start a challenge for the user.  Returns the UserChallengeContexts object.
+    Start a chat template for the user.  Returns the UserChatTemplateContext object.
     """
-    # Check if challenge exists
-
-    # Check if user already has a context for this challenge
-    # Check if challenge exists
-    # Check if user already has a context for this challenge
+    # Check if chat template exists
+    # Check if user already has a context for this chat template
     existing_context = session.exec(
-        select(UserChallengeContexts).where(
+        select(UserChatTemplateContext).where(
             and_(
-                UserChallengeContexts.user_id == user_id,
-                UserChallengeContexts.challenge_id == challenge_id,
+                UserChatTemplateContext.user_id == user_id,
+                UserChatTemplateContext.chat_template_id == chat_template_id,
             )
         )
     ).first()
@@ -283,27 +276,27 @@ def start_challenge(
     if existing_context:
         return existing_context
 
-    # Auto-join the tournament for this challenge, which is idempotent.
-    challenge = session.get(Challenges, challenge_id)
-    if not challenge:
-        raise NotFoundError("Challenge not found")
-    if not challenge.tournament:
-        raise ValueError("Challenge is not part of a tournament")
-    assert challenge.tournament.id is not None, "Tournament ID should not be None"
-    join_tournament(session, user_id, challenge.tournament.id)
+    # Verify the chat template exists and is part of a container
+    template = session.get(ChatTemplate, chat_template_id)
+    if not template:
+        raise NotFoundError("Chat template not found")
+    if not template.chat_template_container:
+        raise ValueError("Chat template is not part of a container")
+    assert template.chat_template_container.id is not None, "Container ID should not be None"
 
-    # Create new challenge context
-    context = UserChallengeContexts(
+    # Create new chat template context
+    context = UserChatTemplateContext(
         user_id=user_id,
-        challenge_id=challenge_id,
+        chat_template_id=chat_template_id,
         started_at=datetime.now(UTC),
         can_contribute=True,
+        last_message_version=0,
     )
     session.add(context)
     session.flush()
-    assert context.id is not None, "User challenge context ID should not be None"
+    assert context.id is not None, "User chat template context ID should not be None"
     evaluation: ChallengeEvaluations = ChallengeEvaluations(
-        user_challenge_context_id=context.id,
+        user_chat_template_context_id=context.id,
         created_at=datetime.now(UTC),
     )
 
@@ -314,83 +307,41 @@ def start_challenge(
     return context
 
 
-def join_tournament(
-    session: Session, user_id: int, tournament_id: int
-) -> UserTournamentEnrollments:
-    """
-    Enroll a user in a tournament. If the user is already enrolled, do nothing.
-    Returns the UserTournamentEnrollments object.
-    """
-
-    tournament = session.get(Tournaments, tournament_id)
-    if not tournament:
-        raise NotFoundError("Tournament not found")
-    if tournament.start_date > datetime.now(UTC):
-        raise ValueError("Tournament has not started yet")
-    if tournament.end_date < datetime.now(UTC):
-        raise ValueError("Tournament has already ended")
-
-    existing_enrollment = session.exec(
-        select(UserTournamentEnrollments).where(
-            and_(
-                UserTournamentEnrollments.user_id == user_id,
-                UserTournamentEnrollments.tournament_id == tournament_id,
-            )
-        )
-    ).first()
-
-    if existing_enrollment:
-        return existing_enrollment
-
-    # Create new enrollment
-    enrollment = UserTournamentEnrollments(
-        user_id=user_id,
-        tournament_id=tournament_id,
-        enrolled_at=datetime.now(UTC),
-    )
-
-    session.add(enrollment)
-    session.commit()
-    session.refresh(enrollment)
-
-    return enrollment
-
-
-def list_tournaments(
+def list_chat_template_containers(
     session: Session,
     selection_filter: SelectionFilter = SelectionFilter.ACTIVE_ONLY,
     page_index: int = 0,
     count: int = 10,
-) -> Iterable[Tournaments]:
+) -> Iterable[ChatTemplateContainer]:
     """
-    List tournaments based on selection filter, pagination, and count.
+    List chat template containers based on selection filter, pagination, and count.
     """
     now = datetime.now(UTC)
 
     # Start with base select statement
-    statement = select(Tournaments)
+    statement = select(ChatTemplateContainer)
 
     # Apply filters based on selection_filter
     if selection_filter == SelectionFilter.PAST_ONLY:
-        statement = statement.where(Tournaments.end_date < now)
+        statement = statement.where(ChatTemplateContainer.end_date < now)
     elif selection_filter == SelectionFilter.ACTIVE_ONLY:
         statement = statement.where(
-            Tournaments.start_date <= now, Tournaments.end_date >= now
+            ChatTemplateContainer.start_date <= now, ChatTemplateContainer.end_date >= now
         )
     elif selection_filter == SelectionFilter.FUTURE_ONLY:
-        statement = statement.where(Tournaments.start_date > now)
+        statement = statement.where(ChatTemplateContainer.start_date > now)
     elif selection_filter == SelectionFilter.PAST_AND_ACTIVE:
         statement = statement.where(
             or_(
-                Tournaments.end_date < now,
-                and_(Tournaments.start_date <= now, Tournaments.end_date >= now),
+                ChatTemplateContainer.end_date < now,
+                and_(ChatTemplateContainer.start_date <= now, ChatTemplateContainer.end_date >= now),
             )
         )
     elif selection_filter == SelectionFilter.ACTIVE_AND_FUTURE:
         statement = statement.where(
             or_(
-                and_(Tournaments.start_date <= now, Tournaments.end_date >= now),
-                Tournaments.start_date > now,
+                and_(ChatTemplateContainer.start_date <= now, ChatTemplateContainer.end_date >= now),
+                ChatTemplateContainer.start_date > now,
             )
         )
 
@@ -404,30 +355,30 @@ def list_tournaments(
     return tournaments
 
 
-def list_challenges(
+def list_chat_templates(
     session: Session,
-    tournament_id: int | None = None,
+    chat_template_container_id: int | None = None,
     page_index: int = 0,
     count: int = 10,
-) -> Iterable[Challenges]:
+) -> Iterable[ChatTemplate]:
     """
-    List challenges based on tournament ID, pagination, and count.
+    List chat templates based on container ID, pagination, and count.
     """
-    statement = select(Challenges).options(selectinload(Challenges.tournament))
-    if tournament_id:
-        statement = statement.where(Challenges.tournament_id == tournament_id)
+    statement = select(ChatTemplate).options(selectinload(ChatTemplate.chat_template_container))
+    if chat_template_container_id:
+        statement = statement.where(ChatTemplate.chat_template_container_id == chat_template_container_id)
     statement = statement.offset(page_index * count).limit(count)
     challenges = session.exec(statement).all()
     return challenges
 
 
-def _instantiate_challenge_context_messages(
-    challenge_context_messages: Iterable[UserChallengeContextMessages],
+def _instantiate_chat_template_context_messages(
+    chat_template_context_messages: Iterable[UserChatTemplateContextMessages],
 ) -> Iterable[ChatEntry]:
-    """Instantiate chat entries from user challenge context messages.
+    """Instantiate chat entries from user chat template context messages.
 
     Args:
-        challenge_context_messages (Iterable[UserChallengeContextMessages]): The user challenge context messages to instantiate.
+        chat_template_context_messages (Iterable[UserChatTemplateContextMessages]): The user chat template context messages to instantiate.
 
     Raises:
         ValueError: If the content type of the message is unknown.
@@ -438,10 +389,10 @@ def _instantiate_challenge_context_messages(
     Yields:
         Iterator[Iterable[ChatEntry]]: An iterator that yields chat entries based on the content type of the messages.
     """
-    challenge_context_messages = sorted(
-        challenge_context_messages, key=lambda m: m.created_at
+    chat_template_context_messages = sorted(
+        chat_template_context_messages, key=lambda m: m.created_at
     )
-    for message in challenge_context_messages:
+    for message in chat_template_context_messages:
         if message.content_type == "ChatRequest":
             yield ChatRequest.model_validate_json(message.content)  # type: ignore
         elif message.content_type == "ChatResponseWithTools":
@@ -454,79 +405,71 @@ def _instantiate_challenge_context_messages(
             raise ValueError(f"Unknown content type: {message.content_type}")
 
 
-def load_challenge_context_messages(
-    session: Session, user_challenge_context_id: int
+def load_chat_template_context_messages(
+    session: Session, user_chat_template_context_id: int
 ) -> Iterable[Message]:
     """
-    Load all messages for a given user challenge context.
-    Returns a list of UserChallengeContextMessages.
+    Load all messages for a given user chat template context.
+    Returns a list of UserChatTemplateContextMessages.
     """
-    user_challenge_context: UserChallengeContexts | None = session.exec(
-        select(UserChallengeContexts).where(
-            UserChallengeContexts.id == user_challenge_context_id
+    user_chat_template_context: UserChatTemplateContext | None = session.exec(
+        select(UserChatTemplateContext).where(
+            UserChatTemplateContext.id == user_chat_template_context_id
         )
     ).first()
-    if not user_challenge_context:
-        raise NotFoundError("User challenge context not found")
+    if not user_chat_template_context:
+        raise NotFoundError("User chat template context not found")
 
     default_messages: list[Message] = []
-    assert user_challenge_context.challenge is not None, "Challenge should not be None"
-    if user_challenge_context.challenge.system_prompt:
-        default_messages.append(
-            Message(
-                role="system", content=user_challenge_context.challenge.system_prompt
-            )
-        )
-    if user_challenge_context.challenge.initial_llm_prompt:
-        default_messages.append(
-            Message(
-                role="assistant",
-                content=user_challenge_context.challenge.initial_llm_prompt,
-            )
-        )
+    assert user_chat_template_context.chat_template is not None, "Chat template should not be None"
+    # Extract initial messages from message_tree using Pydantic models
+    if user_chat_template_context.chat_template.message_tree:
+        for node_data in user_chat_template_context.chat_template.message_tree:
+            container = MessageContainer.model_validate(node_data)
+            default_messages.append(container.message)
 
-    context_messages: Iterable[UserChallengeContextMessages] = session.exec(
-        select(UserChallengeContextMessages).where(
-            UserChallengeContextMessages.user_challenge_context_id
-            == user_challenge_context_id
+    context_messages: Iterable[UserChatTemplateContextMessages] = session.exec(
+        select(UserChatTemplateContextMessages).where(
+            UserChatTemplateContextMessages.user_chat_template_context_id
+            == user_chat_template_context_id
         )
     ).all()
     return default_messages + list(
         map_chat_entries_to_messages(
-            list(_instantiate_challenge_context_messages(context_messages))
+            list(_instantiate_chat_template_context_messages(context_messages))
         )
     )
 
 
-def get_user_message_count_in_challenge_context(
-    session: Session, user_challenge_context_id: int
+def get_user_message_count_in_chat_template_context(
+    session: Session, user_chat_template_context_id: int
 ) -> int:
     """
-    Get the count of user messages in a given challenge context.
+    Get the count of user messages in a given chat template context.
     Returns the count of messages.
     """
     count: int = session.exec(
         select(func.count())
-        .select_from(UserChallengeContextMessages)
+        .select_from(UserChatTemplateContextMessages)
         .where(
             and_(
-                UserChallengeContextMessages.user_challenge_context_id
-                == user_challenge_context_id,
-                UserChallengeContextMessages.role == "user",
+                UserChatTemplateContextMessages.user_chat_template_context_id
+                == user_chat_template_context_id,
+                UserChatTemplateContextMessages.role == "user",
             )
         )
     ).one()
     return count
 
 
-def get_challenge_tools(session: Session, challenge_id: int) -> list[str] | None:
+def get_chat_template_tools(session: Session, chat_template_id: int) -> list[str] | None:
     """
-    Get the list of tools available for a given challenge.
+    Get the list of tools available for a given chat template.
     Returns a list of tool names.
     """
-    challenge = session.get(Challenges, challenge_id)
-    if not challenge:
-        raise NotFoundError("Challenge not found")
+    template = session.get(ChatTemplate, chat_template_id)
+    if not template:
+        raise NotFoundError("Chat template not found")
 
     # Assuming tools are stored in a related model or as a JSON field
-    return json.loads(challenge.required_tools) if challenge.required_tools else None
+    return json.loads(template.required_tools) if template.required_tools else None

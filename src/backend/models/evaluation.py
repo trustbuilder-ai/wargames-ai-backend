@@ -21,4 +21,4 @@ class EvalResult(BaseModel):
     # evaluation.
     reason: str | None = None
     status: EvalStatus
-    challenge_id: int | None = None
+    chat_template_id: int | None = None

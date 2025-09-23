@@ -3,9 +3,9 @@ from strenum import StrEnum
 
 from backend.database.models import (
     Badges,
-    Challenges,
-    Tournaments,
-    UserChallengeContexts,
+    ChatTemplate,
+    ChatTemplateContainer,
+    UserChatTemplateContext,
 )
 from backend.models.evaluation import EvalResult
 from backend.models.llm import ToolCall
@@ -13,14 +13,14 @@ from backend.models.llm import ToolCall
 
 class UserInfo(BaseModel):
     """
-    Represents a user's information including active tournaments, challenges,
+    Represents a user's information including active chat template containers, chat templates,
     and badges.
     """
 
     user_id: int
     email: str | None = None
-    active_tournaments: list[Tournaments]
-    active_challenge_contexts: list[UserChallengeContexts]
+    active_chat_template_containers: list[ChatTemplateContainer]
+    active_chat_template_contexts: list[UserChatTemplateContext]
     badges: list[Badges]
     eval_results: list[EvalResult] = []
 
@@ -38,13 +38,13 @@ class Message(BaseModel):
     tool_call_id: str | None = None
 
 
-class ChallengeContextResponse(BaseModel):
+class ChatTemplateContextResponse(BaseModel):
     """
-    Represents the full message context for a challenge, including user challenge context
+    Represents the full message context for a chat template, including user chat template context
     and messages.
     """
 
-    user_challenge_context: UserChallengeContexts
+    user_chat_template_context: UserChatTemplateContext
     messages: list[Message] = []
     eval_result: EvalResult | None = None
     remaining_message_count: int = 0
@@ -85,7 +85,7 @@ class MessageContainer(BaseModel):
 MessageTree = list[MessageContainer]
 
 
-class ChallengeContextLLMResponse(BaseModel):
+class ChatTemplateContextLLMResponse(BaseModel):
     """
     Represents a response from the LLM call.
     """
@@ -94,6 +94,6 @@ class ChallengeContextLLMResponse(BaseModel):
     messages: list[Message]
 
 
-class ChallengesPublic(BaseModel):
-    challenge: Challenges
-    tournament_name: str
+class ChatTemplatesPublic(BaseModel):
+    chat_template: ChatTemplate
+    container_name: str
