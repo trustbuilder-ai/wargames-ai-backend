@@ -415,15 +415,23 @@ def list_chat_template_containers(
 def list_chat_templates(
     session: Session,
     chat_template_container_id: int | None = None,
+    container_type: str | None = None,
     page_index: int = 0,
     count: int = 10,
 ) -> Iterable[ChatTemplate]:
     """
-    List chat templates based on container ID, pagination, and count.
+    List chat templates based on container ID, container type, pagination, and count.
     """
     statement = select(ChatTemplate).options(selectinload(ChatTemplate.chat_template_container))
+
+    # Filter by specific container ID if provided
     if chat_template_container_id:
         statement = statement.where(ChatTemplate.chat_template_container_id == chat_template_container_id)
+
+    # Filter by container type if provided
+    if container_type:
+        statement = statement.join(ChatTemplateContainer).where(ChatTemplateContainer.type == container_type)
+
     statement = statement.offset(page_index * count).limit(count)
     challenges = session.exec(statement).all()
     return challenges

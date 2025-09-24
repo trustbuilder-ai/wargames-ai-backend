@@ -285,14 +285,19 @@ async def get_badge(
 @app.get("/chat_templates", response_model=list[ChatTemplatesPublic])
 async def list_chat_templates(
     chat_template_container_id: int | None = None,
+    container_type: str | None = None,
     page_index: int = 0,
     count: int = 10,
     db: Session = Depends(get_db),
 ):
-    """List chat templates with filtering"""
+    """List chat templates with filtering by container ID or container type"""
     templates: list[ChatTemplate] = list(
         db_api.list_chat_templates(
-            session=db, chat_template_container_id=chat_template_container_id, page_index=page_index, count=count
+            session=db,
+            chat_template_container_id=chat_template_container_id,
+            container_type=container_type,
+            page_index=page_index,
+            count=count
         )
     )
     return [
