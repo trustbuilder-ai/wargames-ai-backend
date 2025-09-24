@@ -218,15 +218,17 @@ async def get_current_user_full(
 @app.get("/chat_template_containers", response_model=list[ChatTemplateContainer])
 async def list_chat_template_containers(
     selection_filter: SelectionFilter = SelectionFilter.ACTIVE_ONLY,
+    container_type: str | None = None,
     page_index: int = 0,
     count: int = 10,
     # current_user: Dict[str, Any] = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """List tournaments with filtering"""
+    """List tournaments with filtering by date and container type"""
     return db_api.list_chat_template_containers(
         session=db,
         selection_filter=selection_filter,
+        container_type=container_type,
         page_index=page_index,
         count=count,
     )

@@ -16,10 +16,10 @@ class ChatTemplateContainer(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, Identity(start=1, increment=1, minvalue=1, maxvalue=2147483647, cycle=False, cache=1), primary_key=True))
     name: str = Field(sa_column=Column('name', Text))
-    start_date: datetime = Field(sa_column=Column('start_date', DateTime(True)))
-    end_date: datetime = Field(sa_column=Column('end_date', DateTime(True)))
     type: str = Field(sa_column=Column('type', Text, server_default=text("'challenge'::text"), comment='Type of container: challenge, tutorial, assessment, etc.'))
     description: Optional[str] = Field(default=None, sa_column=Column('description', Text))
+    start_date: Optional[datetime] = Field(default=None, sa_column=Column('start_date', DateTime(True), comment='Container start date. NULL means no start restriction (always started)'))
+    end_date: Optional[datetime] = Field(default=None, sa_column=Column('end_date', DateTime(True), comment='Container end date. NULL means no end restriction (never ends)'))
 
     chat_template: List['ChatTemplate'] = Relationship(back_populates='chat_template_container')
 

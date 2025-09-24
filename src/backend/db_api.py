@@ -310,11 +310,12 @@ def start_chat_template(
 def list_chat_template_containers(
     session: Session,
     selection_filter: SelectionFilter = SelectionFilter.ACTIVE_ONLY,
+    container_type: str | None = None,
     page_index: int = 0,
     count: int = 10,
 ) -> Iterable[ChatTemplateContainer]:
     """
-    List chat template containers based on selection filter, pagination, and count.
+    List chat template containers based on selection filter, container type, pagination, and count.
     """
     now = datetime.now(UTC)
 
@@ -323,27 +324,83 @@ def list_chat_template_containers(
 
     # Apply filters based on selection_filter
     if selection_filter == SelectionFilter.PAST_ONLY:
-        statement = statement.where(ChatTemplateContainer.end_date < now)
-    elif selection_filter == SelectionFilter.ACTIVE_ONLY:
+        # Container is past only if it HAS an end_date AND it's in the past
         statement = statement.where(
-            ChatTemplateContainer.start_date <= now, ChatTemplateContainer.end_date >= now
+            and_(
+                ChatTemplateContainer.end_date.isnot(None),
+                ChatTemplateContainer.end_date < now
+            )
+        )
+    elif selection_filter == SelectionFilter.ACTIVE_ONLY:
+        # Active if (no start OR started) AND (no end OR not ended)
+        statement = statement.where(
+            and_(
+                or_(
+                    ChatTemplateContainer.start_date.is_(None),
+                    ChatTemplateContainer.start_date <= now
+                ),
+                or_(
+                    ChatTemplateContainer.end_date.is_(None),
+                    ChatTemplateContainer.end_date >= now
+                )
+            )
         )
     elif selection_filter == SelectionFilter.FUTURE_ONLY:
-        statement = statement.where(ChatTemplateContainer.start_date > now)
+        # Container is future only if it HAS a start_date AND it's in the future
+        statement = statement.where(
+            and_(
+                ChatTemplateContainer.start_date.isnot(None),
+                ChatTemplateContainer.start_date > now
+            )
+        )
     elif selection_filter == SelectionFilter.PAST_AND_ACTIVE:
+        # Past OR Active
         statement = statement.where(
             or_(
-                ChatTemplateContainer.end_date < now,
-                and_(ChatTemplateContainer.start_date <= now, ChatTemplateContainer.end_date >= now),
+                # Past: has end_date and it's past
+                and_(
+                    ChatTemplateContainer.end_date.isnot(None),
+                    ChatTemplateContainer.end_date < now
+                ),
+                # Active: (no start OR started) AND (no end OR not ended)
+                and_(
+                    or_(
+                        ChatTemplateContainer.start_date.is_(None),
+                        ChatTemplateContainer.start_date <= now
+                    ),
+                    or_(
+                        ChatTemplateContainer.end_date.is_(None),
+                        ChatTemplateContainer.end_date >= now
+                    )
+                )
             )
         )
     elif selection_filter == SelectionFilter.ACTIVE_AND_FUTURE:
+        # Active OR Future
         statement = statement.where(
             or_(
-                and_(ChatTemplateContainer.start_date <= now, ChatTemplateContainer.end_date >= now),
-                ChatTemplateContainer.start_date > now,
+                # Active: (no start OR started) AND (no end OR not ended)
+                and_(
+                    or_(
+                        ChatTemplateContainer.start_date.is_(None),
+                        ChatTemplateContainer.start_date <= now
+                    ),
+                    or_(
+                        ChatTemplateContainer.end_date.is_(None),
+                        ChatTemplateContainer.end_date >= now
+                    )
+                ),
+                # Future: has start_date and it's in future
+                and_(
+                    ChatTemplateContainer.start_date.isnot(None),
+                    ChatTemplateContainer.start_date > now
+                )
             )
         )
+
+    # Apply container type filter if provided
+    if container_type:
+        statement = statement.where(ChatTemplateContainer.type == container_type)
 
     # Apply pagination
     statement = statement.offset(page_index * count).limit(count)
