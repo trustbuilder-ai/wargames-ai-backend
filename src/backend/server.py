@@ -319,7 +319,7 @@ async def start_chat_template(
     if user.id is None:
         raise HTTPException(status_code=500, detail="User ID not found")
 
-    template = db.get(ChatTemplate, template_id)
+    template = db.get(ChatTemplate, chat_template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Chat template not found")
 
