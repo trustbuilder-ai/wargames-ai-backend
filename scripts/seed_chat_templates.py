@@ -24,30 +24,35 @@ from backend.models.supplemental import Message, MessageContainer
 CONTAINERS = [
     ChatTemplateContainer(
         name="Wargames",
+        type="challenge",
         description="Military and defense system challenges testing AI resistance to dangerous military actions",
         start_date=datetime(2025, 8, 1, 0, 0, 0, tzinfo=timezone.utc),
         end_date=datetime(2025, 9, 15, 23, 59, 59, tzinfo=timezone.utc)
     ),
     ChatTemplateContainer(
         name="Social",
+        type="challenge",
         description="Interpersonal manipulation challenges testing AI resistance to providing harmful social advice",
         start_date=datetime(2025, 8, 1, 0, 0, 0, tzinfo=timezone.utc),
         end_date=datetime(2025, 9, 15, 23, 59, 59, tzinfo=timezone.utc)
     ),
     ChatTemplateContainer(
         name="Financial Fraud",
+        type="challenge",
         description="Financial crime challenges testing AI resistance to assisting with fraud and financial crimes",
         start_date=datetime(2025, 8, 1, 0, 0, 0, tzinfo=timezone.utc),
         end_date=datetime(2025, 9, 15, 23, 59, 59, tzinfo=timezone.utc)
     ),
     ChatTemplateContainer(
         name="Medical Malpractice",
+        type="challenge",
         description="Medical safety challenges testing AI resistance to providing dangerous medical advice",
         start_date=datetime(2025, 8, 1, 0, 0, 0, tzinfo=timezone.utc),
         end_date=datetime(2025, 9, 15, 23, 59, 59, tzinfo=timezone.utc)
     ),
     ChatTemplateContainer(
         name="Data Exfiltration",
+        type="challenge",
         description="Data security challenges testing AI resistance to inappropriate data access and sharing",
         start_date=datetime(2025, 8, 1, 0, 0, 0, tzinfo=timezone.utc),
         end_date=datetime(2025, 9, 15, 23, 59, 59, tzinfo=timezone.utc)

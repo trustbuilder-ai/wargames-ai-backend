@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKeyConstraint, Identity, Index, Integer, PrimaryKeyConstraint, Sequence, String, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKeyConstraint, Identity, Index, Integer, PrimaryKeyConstraint, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -10,6 +10,7 @@ class ChatTemplateContainer(SQLModel, table=True):
     __table_args__ = (
         PrimaryKeyConstraint('id', name='tournaments_pkey'),
         UniqueConstraint('id', name='tournaments_id_key'),
+        Index('idx_chat_template_container_type', 'type'),
         Index('idx_tournaments_dates', 'start_date', 'end_date')
     )
 
@@ -17,6 +18,7 @@ class ChatTemplateContainer(SQLModel, table=True):
     name: str = Field(sa_column=Column('name', Text))
     start_date: datetime = Field(sa_column=Column('start_date', DateTime(True)))
     end_date: datetime = Field(sa_column=Column('end_date', DateTime(True)))
+    type: str = Field(sa_column=Column('type', Text, server_default=text("'challenge'::text"), comment='Type of container: challenge, tutorial, assessment, etc.'))
     description: Optional[str] = Field(default=None, sa_column=Column('description', Text))
 
     chat_template: List['ChatTemplate'] = Relationship(back_populates='chat_template_container')
@@ -66,7 +68,7 @@ class Badges(SQLModel, table=True):
         Index('idx_badges_chat_template_id', 'chat_template_id')
     )
 
-    id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, primary_key=True))
+    id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, Identity(start=1, increment=1, minvalue=1, maxvalue=2147483647, cycle=False, cache=1), primary_key=True))
     chat_template_id: int = Field(sa_column=Column('chat_template_id', Integer))
 
     chat_template: Optional['ChatTemplate'] = Relationship(back_populates='badges')
@@ -84,7 +86,7 @@ class UserChatTemplateContext(SQLModel, table=True):
         Index('idx_user_chat_template_context_user_id', 'user_id')
     )
 
-    id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, Sequence('user_challenge_contexts_id_seq'), primary_key=True))
+    id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, Identity(start=1, increment=1, minvalue=1, maxvalue=2147483647, cycle=False, cache=1), primary_key=True))
     can_contribute: bool = Field(sa_column=Column('can_contribute', Boolean))
     chat_template_id: int = Field(sa_column=Column('chat_template_id', Integer))
     started_at: datetime = Field(sa_column=Column('started_at', DateTime(True)))
@@ -136,7 +138,7 @@ class UserBadges(SQLModel, table=True):
         Index('idx_user_badges_user_id', 'user_id')
     )
 
-    id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, primary_key=True))
+    id: Optional[int] = Field(default=None, sa_column=Column('id', Integer, Identity(start=1, increment=1, minvalue=1, maxvalue=2147483647, cycle=False, cache=1), primary_key=True))
     user_id: int = Field(sa_column=Column('user_id', Integer))
     badge_id: int = Field(sa_column=Column('badge_id', Integer))
     awarded_at: datetime = Field(sa_column=Column('awarded_at', DateTime(True)))
