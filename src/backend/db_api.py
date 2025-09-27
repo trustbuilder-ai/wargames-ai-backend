@@ -15,13 +15,13 @@ from backend.database.models import (
     ChatTemplate,
     ChatTemplateContainer,
     UserBadges,
-    UserChatTemplateContextMessages,
     UserChatTemplateContext,
+    UserChatTemplateContextMessages,
     Users,
 )
 from backend.evaluation import format_eval_result
 from backend.exceptions import NotFoundError
-from backend.llm.shim import map_chat_entries_to_messages
+from backend.llm.shim import map_chat_entries_to_messages, wrap_message_in_container
 from backend.models.llm import (
     ChatEntry,
     ChatMessageWithTools,
@@ -65,8 +65,7 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
     user: Users = ensure_user_exists(session, user_sub)
     # Get all active chat template containers (no user enrollment filtering since that table is removed)
     active_containers = session.exec(
-        select(ChatTemplateContainer)
-        .where(
+        select(ChatTemplateContainer).where(
             and_(
                 ChatTemplateContainer.start_date <= now,
                 ChatTemplateContainer.end_date >= now,
@@ -110,16 +109,18 @@ def get_user_info(session: Session, user_sub: str) -> UserInfo | None:
     )
 
 
-def add_message_to_chat_template(
+def add_message_to_chat_template_context(
     session: Session,
     user_id: int,
     chat_template_id: int,
     model: str,
     message: str,
     role: Literal["user", "assistant", "system"] = "user",
-) -> int:
+    parent_id_in_tree: int | None = None,
+) -> tuple[int, int]:
     """
     Add a message to the chat template context.
+    Returns a tuple of (user_chat_template_context_id, id_in_tree).
     """
     # Add message if it can be added to the context. It will be followed up by a processed
     # at message.
@@ -153,35 +154,102 @@ def add_message_to_chat_template(
     if not user_chat_template_context_id:
         raise NotFoundError("User chat template context not found")
 
-    chat_message: ChatMessageWithTools = ChatMessageWithTools(
-        role=role, content=message
+    # Create the message to wrap in container
+    user_message = Message(role=role, content=message)
+
+    # Calculate the next id_in_tree by counting existing messages
+    # This includes both template messages and user messages
+    existing_message_count = session.exec(
+        select(func.count(UserChatTemplateContextMessages.id)).where(
+            UserChatTemplateContextMessages.user_chat_template_context_id
+            == user_chat_template_context_id
+        )
+    ).one()
+
+    # Get the template message count from message_tree
+    template_message_count = 0
+    if (
+        user_chat_template_context.chat_template
+        and user_chat_template_context.chat_template.message_tree
+    ):
+        template_message_count = len(
+            user_chat_template_context.chat_template.message_tree
+        )
+
+    # Tree ID is template messages + existing user messages + 1
+    id_in_tree = template_message_count + existing_message_count + 1
+
+    # Wrap the message in a container with the tree-scoped ID
+    message_container = wrap_message_in_container(
+        message=user_message,
+        id_in_tree=id_in_tree,
+        parent_id_in_tree=parent_id_in_tree,
     )
 
+    # Create the context message record with the serialized container
     context_message: UserChatTemplateContextMessages = UserChatTemplateContextMessages(
         user_chat_template_context_id=user_chat_template_context_id,
-        content=chat_message.model_dump_json(),
+        content=message_container.model_dump_json(),
         created_at=datetime.now(UTC),
-        content_type=chat_message.__class__.__name__,
+        content_type="MessageContainer",
         model=model,
         role=role,
         is_user_provided=True,
+        parent_message_id=None,  # Not using database parent_message_id for tree structure
     )
     session.add(context_message)
     session.commit()
-    return user_chat_template_context_id
+
+    return user_chat_template_context_id, id_in_tree
 
 
 def add_chat_entries_to_chat_template_no_checks(
     session: Session,
     user_chat_template_context_id: int,
     chat_entries: list[ChatEntry],
+    parent_id_in_tree: int | None = None,
 ):
     """
     Bulk add messages to a chat template context without checks.
     This assumes that the caller has already called add_message_to_challenge
     or similar to ensure the context exists and is valid.
     """
-    for chat_entry in chat_entries:
+    # Get the user context to access template message count
+    user_chat_template_context = session.exec(
+        select(UserChatTemplateContext).where(
+            UserChatTemplateContext.id == user_chat_template_context_id
+        )
+    ).first()
+
+    if not user_chat_template_context:
+        raise ValueError("User chat template context not found")
+
+    # Get existing message count for calculating tree IDs
+    existing_message_count = session.exec(
+        select(func.count(UserChatTemplateContextMessages.id)).where(
+            UserChatTemplateContextMessages.user_chat_template_context_id
+            == user_chat_template_context_id
+        )
+    ).one()
+
+    # Get the template message count from message_tree
+    template_message_count = 0
+    if (
+        user_chat_template_context.chat_template
+        and user_chat_template_context.chat_template.message_tree
+    ):
+        template_message_count = len(
+            user_chat_template_context.chat_template.message_tree
+        )
+
+    # Start tree ID from template messages + existing user messages + 1
+    current_tree_id = template_message_count + existing_message_count + 1
+    current_parent_id = parent_id_in_tree
+
+    # Convert chat entries to messages
+    messages = list(map_chat_entries_to_messages(chat_entries))
+
+    for chat_entry, message in zip(chat_entries, messages):
         if not isinstance(
             chat_entry, (ChatResponseWithTools, ChatMessageWithTools, ChatResponse)
         ):  # type: ignore[reportUnnecessaryIsInstance]
@@ -194,15 +262,29 @@ def add_chat_entries_to_chat_template_no_checks(
             role = chat_entry.role
         else:
             raise ValueError(f"Invalid chat entry type: {type(chat_entry)}")
+
+        # Wrap the message in a container with tree-scoped IDs
+        message_container = wrap_message_in_container(
+            message=message,
+            id_in_tree=current_tree_id,
+            parent_id_in_tree=current_parent_id,
+        )
+
         context_message: UserChatTemplateContextMessages = UserChatTemplateContextMessages(
             user_chat_template_context_id=user_chat_template_context_id,
-            content=chat_entry.model_dump_json(),
+            content=message_container.model_dump_json(),
             created_at=datetime.now(UTC),
-            content_type=chat_entry.__class__.__name__,
+            content_type="MessageContainer",
             role=role,
             is_user_provided=True,
+            parent_message_id=None,  # Not using database parent_message_id for tree structure
         )
         session.add(context_message)
+
+        # Update for next iteration
+        current_parent_id = current_tree_id
+        current_tree_id += 1
+
     session.commit()
 
 
@@ -282,7 +364,9 @@ def start_chat_template(
         raise NotFoundError("Chat template not found")
     if not template.chat_template_container:
         raise ValueError("Chat template is not part of a container")
-    assert template.chat_template_container.id is not None, "Container ID should not be None"
+    assert template.chat_template_container.id is not None, (
+        "Container ID should not be None"
+    )
 
     # Create new chat template context
     context = UserChatTemplateContext(
@@ -328,7 +412,7 @@ def list_chat_template_containers(
         statement = statement.where(
             and_(
                 ChatTemplateContainer.end_date.isnot(None),
-                ChatTemplateContainer.end_date < now
+                ChatTemplateContainer.end_date < now,
             )
         )
     elif selection_filter == SelectionFilter.ACTIVE_ONLY:
@@ -337,12 +421,12 @@ def list_chat_template_containers(
             and_(
                 or_(
                     ChatTemplateContainer.start_date.is_(None),
-                    ChatTemplateContainer.start_date <= now
+                    ChatTemplateContainer.start_date <= now,
                 ),
                 or_(
                     ChatTemplateContainer.end_date.is_(None),
-                    ChatTemplateContainer.end_date >= now
-                )
+                    ChatTemplateContainer.end_date >= now,
+                ),
             )
         )
     elif selection_filter == SelectionFilter.FUTURE_ONLY:
@@ -350,7 +434,7 @@ def list_chat_template_containers(
         statement = statement.where(
             and_(
                 ChatTemplateContainer.start_date.isnot(None),
-                ChatTemplateContainer.start_date > now
+                ChatTemplateContainer.start_date > now,
             )
         )
     elif selection_filter == SelectionFilter.PAST_AND_ACTIVE:
@@ -360,19 +444,19 @@ def list_chat_template_containers(
                 # Past: has end_date and it's past
                 and_(
                     ChatTemplateContainer.end_date.isnot(None),
-                    ChatTemplateContainer.end_date < now
+                    ChatTemplateContainer.end_date < now,
                 ),
                 # Active: (no start OR started) AND (no end OR not ended)
                 and_(
                     or_(
                         ChatTemplateContainer.start_date.is_(None),
-                        ChatTemplateContainer.start_date <= now
+                        ChatTemplateContainer.start_date <= now,
                     ),
                     or_(
                         ChatTemplateContainer.end_date.is_(None),
-                        ChatTemplateContainer.end_date >= now
-                    )
-                )
+                        ChatTemplateContainer.end_date >= now,
+                    ),
+                ),
             )
         )
     elif selection_filter == SelectionFilter.ACTIVE_AND_FUTURE:
@@ -383,18 +467,18 @@ def list_chat_template_containers(
                 and_(
                     or_(
                         ChatTemplateContainer.start_date.is_(None),
-                        ChatTemplateContainer.start_date <= now
+                        ChatTemplateContainer.start_date <= now,
                     ),
                     or_(
                         ChatTemplateContainer.end_date.is_(None),
-                        ChatTemplateContainer.end_date >= now
-                    )
+                        ChatTemplateContainer.end_date >= now,
+                    ),
                 ),
                 # Future: has start_date and it's in future
                 and_(
                     ChatTemplateContainer.start_date.isnot(None),
-                    ChatTemplateContainer.start_date > now
-                )
+                    ChatTemplateContainer.start_date > now,
+                ),
             )
         )
 
@@ -422,15 +506,21 @@ def list_chat_templates(
     """
     List chat templates based on container ID, container type, pagination, and count.
     """
-    statement = select(ChatTemplate).options(selectinload(ChatTemplate.chat_template_container))
+    statement = select(ChatTemplate).options(
+        selectinload(ChatTemplate.chat_template_container)
+    )
 
     # Filter by specific container ID if provided
     if chat_template_container_id:
-        statement = statement.where(ChatTemplate.chat_template_container_id == chat_template_container_id)
+        statement = statement.where(
+            ChatTemplate.chat_template_container_id == chat_template_container_id
+        )
 
     # Filter by container type if provided
     if container_type:
-        statement = statement.join(ChatTemplateContainer).where(ChatTemplateContainer.type == container_type)
+        statement = statement.join(ChatTemplateContainer).where(
+            ChatTemplateContainer.type == container_type
+        )
 
     statement = statement.offset(page_index * count).limit(count)
     challenges = session.exec(statement).all()
@@ -439,7 +529,7 @@ def list_chat_templates(
 
 def _instantiate_chat_template_context_messages(
     chat_template_context_messages: Iterable[UserChatTemplateContextMessages],
-) -> Iterable[ChatEntry]:
+) -> Iterable[ChatEntry | MessageContainer]:
     """Instantiate chat entries from user chat template context messages.
 
     Args:
@@ -449,16 +539,18 @@ def _instantiate_chat_template_context_messages(
         ValueError: If the content type of the message is unknown.
 
     Returns:
-        Iterable[ChatEntry]: Yields chat entries based on the content type of the messages.
+        Iterable[ChatEntry | MessageContainer]: Yields chat entries based on the content type of the messages.
 
     Yields:
-        Iterator[Iterable[ChatEntry]]: An iterator that yields chat entries based on the content type of the messages.
+        Iterator[Iterable[ChatEntry | MessageContainer]]: An iterator that yields chat entries based on the content type of the messages.
     """
     chat_template_context_messages = sorted(
         chat_template_context_messages, key=lambda m: m.created_at
     )
     for message in chat_template_context_messages:
-        if message.content_type == "ChatRequest":
+        if message.content_type == "MessageContainer":
+            yield MessageContainer.model_validate_json(message.content)
+        elif message.content_type == "ChatRequest":
             yield ChatRequest.model_validate_json(message.content)  # type: ignore
         elif message.content_type == "ChatResponseWithTools":
             yield ChatResponseWithTools.model_validate_json(message.content)
@@ -486,7 +578,9 @@ def load_chat_template_context_messages(
         raise NotFoundError("User chat template context not found")
 
     default_messages: list[Message] = []
-    assert user_chat_template_context.chat_template is not None, "Chat template should not be None"
+    assert user_chat_template_context.chat_template is not None, (
+        "Chat template should not be None"
+    )
     # Extract initial messages from message_tree using Pydantic models
     if user_chat_template_context.chat_template.message_tree:
         for node_data in user_chat_template_context.chat_template.message_tree:
@@ -527,7 +621,9 @@ def get_user_message_count_in_chat_template_context(
     return count
 
 
-def get_chat_template_tools(session: Session, chat_template_id: int) -> list[str] | None:
+def get_chat_template_tools(
+    session: Session, chat_template_id: int
+) -> list[str] | None:
     """
     Get the list of tools available for a given chat template.
     Returns a list of tool names.

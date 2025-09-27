@@ -45,7 +45,7 @@ class ChatTemplateContextResponse(BaseModel):
     """
 
     user_chat_template_context: UserChatTemplateContext
-    messages: list[Message] = []
+    messages: list["MessageContainer"] = []
     eval_result: EvalResult | None = None
     remaining_message_count: int = 0
 
@@ -69,14 +69,16 @@ class MessageContainer(BaseModel):
     Used for the ScrollyTell feature to represent hierarchical message structures.
 
     Attributes:
-        id: Unique identifier for the message container.
-        parent_message_id: ID of the parent message, null for root.
+        id_in_tree: Tree-scoped identifier for the message container (not database ID).
+        parent_id_in_tree: Tree-scoped ID of the parent message, null for root.
         message: The actual message content.
     """
 
-    id: int = Field(..., description="Unique identifier for the message container")
-    parent_message_id: int | None = Field(
-        default=None, description="ID of the parent message, null for root"
+    id_in_tree: int = Field(
+        ..., description="Tree-scoped identifier for the message container"
+    )
+    parent_id_in_tree: int | None = Field(
+        default=None, description="Tree-scoped ID of the parent message, null for root"
     )
     message: Message = Field(..., description="The actual message content")
 

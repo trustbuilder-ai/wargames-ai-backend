@@ -66,7 +66,9 @@ CONVERSATION:
 """
 
 
-def _set_chat_template_context_processed(session: Session, chat_template_context_id: int) -> UserChatTemplateContext:
+def _set_chat_template_context_processed(
+    session: Session, chat_template_context_id: int
+) -> UserChatTemplateContext:
     """
     Set the chat template context as processed and update the evaluation status.
     This function should be called within a lock to prevent race conditions.
@@ -74,7 +76,8 @@ def _set_chat_template_context_processed(session: Session, chat_template_context
     # Reload the evaluation to ensure we have the latest state
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.user_chat_template_context_id == chat_template_context_id
+            ChallengeEvaluations.user_chat_template_context_id
+            == chat_template_context_id
         )
     ).first()
     assert evaluation, "Evaluation must exist for chat template context"
@@ -259,7 +262,8 @@ async def evaluate_chat_template_context(
     logger.info(f"Evaluating chat template context with ID: {chat_template_context_id}")
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.user_chat_template_context_id == chat_template_context_id
+            ChallengeEvaluations.user_chat_template_context_id
+            == chat_template_context_id
         )
     ).first()
     if not evaluation:
@@ -268,8 +272,8 @@ async def evaluate_chat_template_context(
         return format_eval_result(evaluation)
 
     with Locker(session).acquire_lock(str(chat_template_context_id)):
-        chat_template_context: UserChatTemplateContext = _set_chat_template_context_processed(
-            session, chat_template_context_id
+        chat_template_context: UserChatTemplateContext = (
+            _set_chat_template_context_processed(session, chat_template_context_id)
         )
 
     session.refresh(chat_template_context)

@@ -234,7 +234,10 @@ async def list_chat_template_containers(
     )
 
 
-@app.get("/chat_template_containers/{chat_template_container_id}", response_model=ChatTemplateContainer)
+@app.get(
+    "/chat_template_containers/{chat_template_container_id}",
+    response_model=ChatTemplateContainer,
+)
 async def get_chat_template_container(
     chat_template_container_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -297,7 +300,7 @@ async def list_chat_templates(
             chat_template_container_id=chat_template_container_id,
             container_type=container_type,
             page_index=page_index,
-            count=count
+            count=count,
         )
     )
     return [
@@ -312,7 +315,9 @@ async def list_chat_templates(
 
 
 # start chat template route
-@app.post("/chat_templates/{chat_template_id}/start", response_model=UserChatTemplateContext)
+@app.post(
+    "/chat_templates/{chat_template_id}/start", response_model=UserChatTemplateContext
+)
 async def start_chat_template(
     chat_template_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -351,6 +356,7 @@ async def add_message_to_chat_template(
     role: Literal["user", "assistant", "system"] = "user",
     current_user: dict[str, Any] = Depends(get_current_user),
     solicit_llm_response: bool = True,
+    parent_id_in_tree: int | None = None,
     db: Session = Depends(get_db),
 ):
     """Submit a message to the chat template agent"""
@@ -363,13 +369,16 @@ async def add_message_to_chat_template(
         user: Users = ensure_user_exists(db, current_user["id"])
         assert user.id is not None, "User ID should not be None"
 
-        user_chat_template_context_id: int = db_api.add_message_to_chat_template(
-            session=db,
-            user_id=user.id,
-            chat_template_id=chat_template_id,
-            model=DEFAULT_CHAT_COMPLETION_MODEL,
-            message=message,
-            role=role,
+        user_chat_template_context_id, user_message_tree_id = (
+            db_api.add_message_to_chat_template_context(
+                session=db,
+                user_id=user.id,
+                chat_template_id=chat_template_id,
+                model=DEFAULT_CHAT_COMPLETION_MODEL,
+                message=message,
+                role=role,
+                parent_id_in_tree=parent_id_in_tree,
+            )
         )
         context_messages: list[Message] = list(
             db_api.load_chat_template_context_messages(
@@ -379,9 +388,6 @@ async def add_message_to_chat_template(
         )
 
         if solicit_llm_response:
-            # XXXXXX TODO: add LLM contexts.
-            # Optionally trigger LLM response generation
-            # This could be an async task or direct call depending on your architecture
             template_tools: list[str] | None = db_api.get_chat_template_tools(
                 session=db, chat_template_id=chat_template_id
             )
@@ -405,6 +411,7 @@ async def add_message_to_chat_template(
                 session=db,
                 user_chat_template_context_id=user_chat_template_context_id,
                 chat_entries=chat_entry_list,
+                parent_id_in_tree=user_message_tree_id,
             )
             return ChatTemplateContextLLMResponse(
                 remaining_message_count=MAX_USER_MESSAGE_COUNT_FOR_CHAT_TEMPLATE
@@ -446,8 +453,6 @@ async def evaluate_chat_template_context(
         raise HTTPException(status_code=404, detail="Chat template not found")
 
 
-
-
 # Route for getting user info
 @app.get("/users/me", response_model=UserInfo)
 async def get_current_user_info(
@@ -458,7 +463,10 @@ async def get_current_user_info(
     return get_user_info(db, current_user["id"])
 
 
-@app.get("/chat_templates/{chat_template_id}/context", response_model=ChatTemplateContextResponse)
+@app.get(
+    "/chat_templates/{chat_template_id}/context",
+    response_model=ChatTemplateContextResponse,
+)
 async def get_chat_template_context(
     chat_template_id: int,
     current_user: dict[str, Any] = Depends(get_current_user),
@@ -502,8 +510,8 @@ async def get_message_tree(
     # Return dummy MessageTree data for OpenAPI type generation
     dummy_tree: MessageTree = [
         MessageContainer(
-            id=1,
-            parent_message_id=None,
+            id_in_tree=1,
+            parent_id_in_tree=None,
             message=Message(
                 role="user",
                 content="Dummy message for OpenAPI type generation",
@@ -511,8 +519,8 @@ async def get_message_tree(
             ),
         ),
         MessageContainer(
-            id=2,
-            parent_message_id=1,
+            id_in_tree=2,
+            parent_id_in_tree=1,
             message=Message(
                 role="assistant",
                 content="Dummy response for OpenAPI type generation",

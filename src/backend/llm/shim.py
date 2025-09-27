@@ -21,18 +21,45 @@ from backend.models.llm import (
     ChatResponse,
     ChatResponseWithTools,
 )
-from backend.models.supplemental import Message
+from backend.models.supplemental import Message, MessageContainer
 
 DEFAULT_CHAT_COMPLETION_MODEL: str = "gpt-4o-mini"
 
 
-def map_chat_entries_to_messages(chat_entries: list[ChatEntry]) -> Iterable[Message]:
+def wrap_message_in_container(
+    message: Message, id_in_tree: int, parent_id_in_tree: int | None = None
+) -> MessageContainer:
+    """
+    Wraps a Message object in a MessageContainer with hierarchy information.
+
+    Args:
+        message: The Message object to wrap
+        id_in_tree: The tree-scoped ID for this message container
+        parent_id_in_tree: The tree-scoped ID of the parent message, None for root messages
+
+    Returns:
+        MessageContainer: The wrapped message with hierarchy information
+    """
+    return MessageContainer(
+        id_in_tree=id_in_tree,
+        parent_id_in_tree=parent_id_in_tree,
+        message=message,
+    )
+
+
+def map_chat_entries_to_messages(
+    chat_entries: list[ChatEntry | MessageContainer],
+) -> Iterable[Message]:
     """
     Maps chat entries, which contain the full OpenAI chat message format(s), to simple
     Message objects for easier handling in the UI and in logical inspection.
+    Also handles MessageContainer objects for backward compatibility.
     """
     for chat_entry in chat_entries:
-        if isinstance(chat_entry, ChatMessageWithTools):
+        # Handle MessageContainer input (for backward compatibility)
+        if isinstance(chat_entry, MessageContainer):
+            yield chat_entry.message
+        elif isinstance(chat_entry, ChatMessageWithTools):
             tool_call_id = chat_entry.tool_call_id if chat_entry.tool_call_id else None
             if chat_entry.tool_calls is None:
                 yield Message(
