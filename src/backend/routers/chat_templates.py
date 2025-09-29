@@ -21,7 +21,7 @@ from backend.database.connection import get_db
 from backend.database.models import (
     ChatTemplate,
     ChatTemplateContainer,
-    UserChatTemplateContext,
+    ChatContext,
     Users,
 )
 from backend.db_api import (
@@ -39,7 +39,7 @@ from backend.models.evaluation import EvalResult
 from backend.models.llm import ChatEntry
 from backend.models.supplemental import (
     ChatTemplateContextLLMResponse,
-    ChatTemplateContextResponse,
+    ChatContextResponse,
     ChatTemplatesPublic,
     Message,
     MessageContainer,
@@ -154,7 +154,7 @@ async def list_chat_templates(
 
 
 @router.post(
-    "/chat_templates/{chat_template_id}/start", response_model=UserChatTemplateContext
+    "/chat_templates/{chat_template_id}/start", response_model=ChatContext
 )
 async def start_chat_template(
     chat_template_id: int,

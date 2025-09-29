@@ -5,7 +5,7 @@ from backend.database.models import (
     Badges,
     ChatTemplate,
     ChatTemplateContainer,
-    UserChatTemplateContext,
+    ChatContext,
 )
 from backend.models.evaluation import EvalResult
 from backend.models.llm import ToolCall
@@ -20,7 +20,7 @@ class UserInfo(BaseModel):
     user_id: int
     email: str | None = None
     active_chat_template_containers: list[ChatTemplateContainer]
-    active_chat_template_contexts: list[UserChatTemplateContext]
+    active_chat_template_contexts: list[ChatContext]
     badges: list[Badges]
     eval_results: list[EvalResult] = []
 
@@ -38,14 +38,13 @@ class Message(BaseModel):
     tool_call_id: str | None = None
 
 
-class ChatTemplateContextResponse(BaseModel):
+class ChatContextResponse(BaseModel):
     """
     Represents the full message context for a chat template, including user chat template context
     and messages.
     """
 
-    user_chat_template_context: UserChatTemplateContext
-    messages: list["MessageContainer"] = []
+    user_chat_template_context: ChatContext
     eval_result: EvalResult | None = None
     remaining_message_count: int = 0
 
