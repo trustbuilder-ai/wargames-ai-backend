@@ -13,12 +13,11 @@ from backend import db_api
 from backend.database.locking import Locker
 from backend.database.models import (
     ChallengeEvaluations,
+    ChatContext,
     ChatTemplate,
-    UserChatTemplateContext,
 )
 from backend.exceptions import EvaluationDecodeError, NotFoundError
 from backend.llm.client import LLMClient
-from backend.llm.shim import map_chat_entries_to_messages
 from backend.models.evaluation import EvalResult, EvalStatus
 from backend.models.llm import ChatMessage, ChatRequest, ChatResponse
 from backend.models.supplemental import Message
@@ -67,8 +66,8 @@ CONVERSATION:
 
 
 def _set_chat_template_context_processed(
-    session: Session, chat_template_context_id: int
-) -> UserChatTemplateContext:
+    session: Session, chat_context_id: int
+) -> ChatContext:
     """
     Set the chat template context as processed and update the evaluation status.
     This function should be called within a lock to prevent race conditions.
@@ -76,27 +75,24 @@ def _set_chat_template_context_processed(
     # Reload the evaluation to ensure we have the latest state
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.user_chat_template_context_id
-            == chat_template_context_id
+            ChallengeEvaluations.chat_context_id == chat_context_id
         )
     ).first()
-    assert evaluation, "Evaluation must exist for chat template context"
+    assert evaluation, "Evaluation must exist for chat context"
     if evaluation.processed_at is not None:
         raise ValueError("Evaluation race condition")
     logger.info(
-        f"Setting chat template context {chat_template_context_id} as processed. Evaluation ID: {evaluation.id}"
+        f"Setting chat context {chat_context_id} as processed. Evaluation ID: {evaluation.id}"
     )
     evaluation.processed_at = datetime.now(UTC)
 
-    assert evaluation.user_chat_template_context, (
-        "User chat template context must exist for evaluation"
-    )
-    evaluation.user_chat_template_context.can_contribute = False
+    assert evaluation.chat_context, "Chat context must exist for evaluation"
+    evaluation.chat_context.can_contribute = False
 
     session.add(evaluation)
-    session.add(evaluation.user_chat_template_context)
+    session.add(evaluation.chat_context)
     session.commit()
-    return evaluation.user_chat_template_context
+    return evaluation.chat_context
 
 
 async def get_raw_llm_evaluation(
@@ -144,22 +140,23 @@ async def get_raw_llm_evaluation(
         raise EvaluationDecodeError("Unknown error decoding evaluation result") from e
 
 
-def get_called_tools(chat_template_context: UserChatTemplateContext) -> list[str]:
+def get_called_tools(
+    session: Session, chat_context: ChatContext, leaf_id: int
+) -> list[str]:
     """
-    Get the list of tools called in the chat template context.
-    This function assumes that the chat template context has a 'tool_calls' field
-    that contains a JSON formatted list of tool names.
+    Get the list of tools called in the path to a specific leaf message.
+
+    Args:
+        session: Database session
+        chat_context: Chat context to evaluate
+        leaf_id: ID of the leaf message to evaluate path to
+
+    Returns:
+        List of tool names called in the conversation path
     """
-    messages: list[Message] = list(
-        map_chat_entries_to_messages(
-            list(
-                db_api._instantiate_chat_template_context_messages(
-                    list(  # type: ignore
-                        chat_template_context.user_chat_template_context_messages
-                    )
-                )
-            )
-        )
+    # Get messages from root to the specified leaf
+    messages: list[Message] = db_api.load_chat_context_messages_to_leaf(
+        session, chat_context.id, leaf_id
     )
 
     called_tool_names: set[str] = set()
@@ -174,11 +171,10 @@ def get_called_tools(chat_template_context: UserChatTemplateContext) -> list[str
 
 
 async def _get_evaluation_result(
-    session: Session, chat_template_context: UserChatTemplateContext
+    session: Session, chat_context: ChatContext, leaf_id: int
 ) -> EvalResult:
-    # This chat template context does not have the messages in a user-available format by
-    # default
-    template: ChatTemplate | None = chat_template_context.chat_template
+    # Get the chat template for this context
+    template: ChatTemplate | None = chat_context.chat_template
     assert template, "Chat template must exist for evaluation."
     assert template.id, "Chat template must have an ID for evaluation."
 
@@ -192,7 +188,9 @@ async def _get_evaluation_result(
             "Invalid chat template specification. Must have one of or both of evaluation_prompt and required tools."
         )
     if required_tool_calls:
-        if set(required_tool_calls) - set(get_called_tools(chat_template_context)):
+        if set(required_tool_calls) - set(
+            get_called_tools(session, chat_context, leaf_id)
+        ):
             status = EvalStatus.FAILED
             reason = "Not all tools called"
         else:
@@ -204,16 +202,9 @@ async def _get_evaluation_result(
         and template.evaluation_prompt.strip()
         and status != EvalStatus.FAILED
     ):
-        messages: list[Message] = list(
-            map_chat_entries_to_messages(
-                list(
-                    db_api._instantiate_chat_template_context_messages(
-                        list(  # type: ignore
-                            chat_template_context.user_chat_template_context_messages
-                        )
-                    )
-                )
-            )
+        # Get messages from root to the specified leaf for evaluation
+        messages: list[Message] = db_api.load_chat_context_messages_to_leaf(
+            session, chat_context.id, leaf_id
         )
         evaluation_result: dict[str, str | int] = await get_raw_llm_evaluation(
             template.evaluation_prompt, messages
@@ -231,9 +222,7 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
     """
     Format the evaluation result into a standard EvalResult object.
     """
-    assert evaluation.user_chat_template_context, (
-        "User chat template context must exist for evaluation"
-    )
+    assert evaluation.chat_context, "Chat context must exist for evaluation"
     return EvalResult(
         reason=evaluation.result_text or "No result text",
         status=EvalStatus.SUCCEEDED
@@ -247,23 +236,30 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
                 else EvalStatus.NOT_EVALUATED
             )
         ),
-        chat_template_id=evaluation.user_chat_template_context.chat_template_id,
+        chat_template_id=evaluation.chat_context.chat_template_id,
     )
 
 
 async def evaluate_chat_template_context(
-    session: Session, chat_template_context_id: int
+    session: Session, chat_context_id: int, leaf_id: int
 ) -> EvalResult:
     """
-    Evaluate a chat template context by processing its messages and criteria.
-    This function retrieves the chat template context, checks if it has been processed,
-    and if not, processes it to get the evaluation result.
+    Evaluate a chat template context by processing messages to a specific leaf.
+    This function retrieves the chat context, checks if it has been processed,
+    and if not, processes it to get the evaluation result for the path to the leaf.
+
+    Args:
+        session: Database session
+        chat_context_id: ID of the chat context to evaluate
+        leaf_id: ID of the leaf message to evaluate path to
+
+    Returns:
+        EvalResult with the evaluation outcome
     """
-    logger.info(f"Evaluating chat template context with ID: {chat_template_context_id}")
+    logger.info(f"Evaluating chat context {chat_context_id} to leaf {leaf_id}")
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.user_chat_template_context_id
-            == chat_template_context_id
+            ChallengeEvaluations.chat_context_id == chat_context_id
         )
     ).first()
     if not evaluation:
@@ -271,12 +267,12 @@ async def evaluate_chat_template_context(
     if evaluation.processed_at is not None:
         return format_eval_result(evaluation)
 
-    with Locker(session).acquire_lock(str(chat_template_context_id)):
-        chat_template_context: UserChatTemplateContext = (
-            _set_chat_template_context_processed(session, chat_template_context_id)
+    with Locker(session).acquire_lock(str(chat_context_id)):
+        chat_context: ChatContext = _set_chat_template_context_processed(
+            session, chat_context_id
         )
 
-    session.refresh(chat_template_context)
+    session.refresh(chat_context)
     # Format the chat template context for evaluation.
     result_text: str = "not processed"
     result: str | None = None
@@ -285,7 +281,7 @@ async def evaluate_chat_template_context(
 
     try:
         eval_result: EvalResult = await _get_evaluation_result(
-            session, chat_template_context
+            session, chat_context, leaf_id
         )
         result_text = eval_result.reason or "Unknown reason"
         assert eval_result.status in [

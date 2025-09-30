@@ -2,6 +2,7 @@
 
 This module provides API endpoints for:
 - Creating chat completions with various LLM providers
+- Streaming chat completions using Server-Sent Events (SSE)
 - Listing available models
 - Checking LLM service health status
 """
@@ -9,9 +10,11 @@ This module provides API endpoints for:
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from backend.auth.dependencies import get_current_user
 from backend.llm.client import LLMClient
+from backend.llm.streaming import create_sse_headers, stream_completion_sse
 from backend.models.llm import (
     ChatRequest,
     ChatResponse,
@@ -42,37 +45,35 @@ async def create_chat_completion(
     LLM providers (OpenAI, Anthropic, GitHub, etc.) without requiring a
     separate proxy server.
 
+    Supports both regular (complete) responses and streaming responses using
+    Server-Sent Events (SSE) when stream=true.
+
     Args:
         request: ChatRequest object containing:
             - model: The model to use (e.g., "gpt-4", "claude-3")
             - messages: List of chat messages
             - temperature: Optional sampling temperature
             - max_tokens: Optional maximum tokens to generate
-            - stream: Whether to stream the response
+            - stream: Whether to stream the response (SSE format)
             - user: Optional user identifier for tracking
         current_user: Current authenticated user from JWT token
 
     Returns:
-        ChatResponse: The LLM's response containing:
-            - id: Unique completion ID
-            - object: Response type (always "chat.completion")
-            - created: Unix timestamp of creation
-            - model: The model used
-            - choices: List of completion choices
-            - usage: Token usage statistics
+        - If stream=false: ChatResponse with complete response
+        - If stream=true: StreamingResponse with SSE-formatted chunks
+            Each chunk is sent as: "data: {json_chunk}\n\n"
+            Final message: "data: [DONE]\n\n"
 
     Raises:
         HTTPException: 500 if chat completion fails
 
     Example:
         ```python
-        POST /llm/chat/completions
+        POST / llm / chat / completions
         {
             "model": "gpt-4",
-            "messages": [
-                {"role": "user", "content": "Hello, how are you?"}
-            ],
-            "temperature": 0.7
+            "messages": [{"role": "user", "content": "Hello, how are you?"}],
+            "temperature": 0.7,
         }
         ```
     """
@@ -82,10 +83,31 @@ async def create_chat_completion(
             request.user = current_user["id"]
 
         client = LLMClient()
-        response = await client.chat_completion(request)
 
-        logger.info(f"Chat completion for user {current_user['id']}: {request.model}")
-        return response
+        # Check if streaming is requested
+        if request.stream:
+            logger.info(
+                f"Streaming chat completion for user {current_user['id']}: {request.model}"
+            )
+
+            # Get the streaming iterator from the client
+            stream_iterator = client.astream_completion(request)
+
+            # Convert to SSE format and return as streaming response
+            sse_stream = stream_completion_sse(stream_iterator)
+
+            return StreamingResponse(
+                sse_stream,
+                media_type="text/event-stream",
+                headers=create_sse_headers(),
+            )
+        else:
+            # Non-streaming response
+            response = await client.chat_completion(request)
+            logger.info(
+                f"Chat completion for user {current_user['id']}: {request.model}"
+            )
+            return response
 
     except Exception as e:
         logger.error(f"Chat completion failed for user {current_user['id']}: {e}")

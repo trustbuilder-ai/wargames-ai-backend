@@ -3,9 +3,9 @@ from strenum import StrEnum
 
 from backend.database.models import (
     Badges,
+    ChatContext,
     ChatTemplate,
     ChatTemplateContainer,
-    ChatContext,
 )
 from backend.models.evaluation import EvalResult
 from backend.models.llm import ToolCall
@@ -98,3 +98,35 @@ class ChatTemplateContextLLMResponse(BaseModel):
 class ChatTemplatesPublic(BaseModel):
     chat_template: ChatTemplate
     container_name: str
+
+
+class EnsureChatContextRequest(BaseModel):
+    """Request body for ensuring chat context exists."""
+
+    chat_template_id: int
+
+
+class EnsureChatContextResponse(BaseModel):
+    """Response for ensure chat context endpoint."""
+
+    chat_context: ChatContext
+
+    class Config:
+        from_attributes = True
+        arbitrary_types_allowed = True
+
+
+class UpdateMessageTreeRequest(BaseModel):
+    """Request body for updating message tree."""
+
+    message_tree: MessageTree
+
+
+class UpdateMessageTreeResponse(BaseModel):
+    """Response for update message tree endpoint."""
+
+    chat_context: ChatContext
+
+    class Config:
+        from_attributes = True
+        arbitrary_types_allowed = True

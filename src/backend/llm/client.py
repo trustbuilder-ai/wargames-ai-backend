@@ -4,6 +4,7 @@ This module provides a client class for making direct calls to LLM providers
 using the LiteLLM library, which provides a unified interface to multiple providers.
 """
 
+from collections.abc import AsyncIterator
 from typing import Any
 
 import litellm
@@ -121,6 +122,12 @@ class LLMClient:
 
             # Get API key for the model's provider
             model_config = llm_config.get_model(request.model)
+            if not model_config:
+                available_models = [m.id for m in llm_config.list_models()]
+                raise LLMValidationError(
+                    f"Model '{request.model}' is not configured. "
+                    f"Available models: {', '.join(available_models)}"
+                )
             api_key = api_keys.get_api_key(model_config.provider)
 
             # Make the LiteLLM call with API key
@@ -145,6 +152,75 @@ class LLMClient:
         except Exception as e:
             logger.error(f"LiteLLM completion failed: {e}")
             raise LLMAPIError(f"LLM completion failed: {str(e)}", e) from e
+
+    async def astream_completion(self, request: ChatRequest) -> AsyncIterator[Any]:
+        """Stream a chat completion using LiteLLM.
+
+        Args:
+            request: The chat request with stream=True.
+
+        Yields:
+            Streaming chunks from the LLM provider.
+
+        Raises:
+            LLMValidationError: If request validation fails.
+            LLMAPIError: If the streaming request fails.
+        """
+        try:
+            # Validate the request
+            request_data = request.model_validate(request)
+
+            # Convert messages to LiteLLM format
+            messages = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request_data.messages
+            ]
+
+            # Use provided values or defaults
+            temperature = (
+                request.temperature
+                if request.temperature is not None
+                else llm_config.default_temperature
+            )
+            max_tokens = (
+                request.max_tokens
+                if request.max_tokens is not None
+                else llm_config.default_max_tokens
+            )
+
+            logger.info(f"Making LiteLLM streaming request for model: {request.model}")
+
+            # Get API key for the model's provider
+            model_config = llm_config.get_model(request.model)
+            if not model_config:
+                available_models = [m.id for m in llm_config.list_models()]
+                raise LLMValidationError(
+                    f"Model '{request.model}' is not configured. "
+                    f"Available models: {', '.join(available_models)}"
+                )
+            api_key = api_keys.get_api_key(model_config.provider)
+
+            # Make the streaming LiteLLM call
+            response = await litellm.acompletion(
+                model=request.model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,  # Always True for streaming
+                user=request.user,
+                api_key=api_key,
+            )
+
+            # Yield chunks as they come in
+            async for chunk in response:
+                yield chunk
+
+        except ValidationError as e:
+            logger.error(f"Request validation failed: {e}")
+            raise LLMValidationError(f"Request validation failed: {e}") from e
+        except Exception as e:
+            logger.error(f"LiteLLM streaming failed: {e}")
+            raise LLMAPIError(f"LLM streaming failed: {str(e)}", e) from e
 
     async def list_models(self) -> ModelsResponse:
         """List available models.

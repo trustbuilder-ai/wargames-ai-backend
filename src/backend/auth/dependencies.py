@@ -175,7 +175,7 @@ async def get_current_user(
         ```python
         @app.get("/protected")
         async def protected_route(
-            current_user: dict[str, Any] = Depends(get_current_user)
+            current_user: dict[str, Any] = Depends(get_current_user),
         ):
             return {"user_id": current_user["id"]}
         ```

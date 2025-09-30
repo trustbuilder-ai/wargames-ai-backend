@@ -7,7 +7,7 @@ and includes all route modules. It serves as the entry point for the
 TrustBuilder Wargames AI Backend API.
 
 The application is structured using modular routers for better organization:
-- chat_templates: Chat template and context management
+- routes_prime: Enhanced chat template and context management
 - llm: Language model interactions
 - badges: User achievements and rewards
 - users: User profile management
@@ -21,7 +21,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.auth.dependencies import is_development_env
-from backend.routers import badges, chat_templates, health, llm, users
+from backend.routers import (
+    badges,
+    chat_contexts,
+    chat_templates,
+    evaluations,
+    health,
+    llm,
+    users,
+)
 from backend.util.log import logger
 
 # Initialize FastAPI application
@@ -52,7 +60,11 @@ app.add_middleware(
 app.include_router(health.router)
 
 # Feature-specific routers with their prefixes
-app.include_router(chat_templates.router)  # Handles /chat_templates/* and related
+app.include_router(chat_contexts.router)  # Handles /chat_contexts/*
+app.include_router(evaluations.router)  # Handles /evaluations
+app.include_router(
+    chat_templates.router
+)  # Handles /chat_templates/* and /chat_template_containers
 app.include_router(llm.router)  # Handles /llm/*
 app.include_router(badges.router)  # Handles /badges/*
 app.include_router(users.router)  # Handles /users/*
