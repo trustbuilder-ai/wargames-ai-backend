@@ -134,3 +134,53 @@ async def update_chat_context_message_tree(
         raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/{chat_context_id}", status_code=204)
+async def delete_chat_context(
+    chat_context_id: int,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a chat context.
+
+    Deletes the specified chat context if the current user owns it.
+    Related challenge evaluations will be automatically deleted due to cascade.
+
+    Args:
+        chat_context_id: ID of the chat context to delete
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        204 No Content on successful deletion
+
+    Raises:
+        HTTPException: 404 if context not found, 403 if user doesn't own the context
+    """
+    try:
+        # Verify user exists and get internal user ID
+        user: Users = db_api.ensure_user_exists(db, current_user["id"])
+        if user.id is None:
+            raise HTTPException(status_code=500, detail="User ID not found")
+
+        # Get the context to verify ownership
+        context = db.get(ChatContext, chat_context_id)
+        if not context:
+            raise HTTPException(status_code=404, detail="Chat context not found")
+
+        # Verify ownership
+        if context.user_id != user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to delete this context"
+            )
+
+        # Delete the context
+        db.delete(context)
+        db.commit()
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

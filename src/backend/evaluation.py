@@ -66,7 +66,7 @@ CONVERSATION:
 
 
 def _set_chat_template_context_processed(
-    session: Session, chat_context_id: int
+    session: Session, chat_context_id: int, leaf_id: int
 ) -> ChatContext:
     """
     Set the chat template context as processed and update the evaluation status.
@@ -75,7 +75,8 @@ def _set_chat_template_context_processed(
     # Reload the evaluation to ensure we have the latest state
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.chat_context_id == chat_context_id
+            ChallengeEvaluations.chat_context_id == chat_context_id,
+            ChallengeEvaluations.context_message_leaf_id == leaf_id
         )
     ).first()
     assert evaluation, "Evaluation must exist for chat context"
@@ -259,17 +260,28 @@ async def evaluate_chat_template_context(
     logger.info(f"Evaluating chat context {chat_context_id} to leaf {leaf_id}")
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
-            ChallengeEvaluations.chat_context_id == chat_context_id
+            ChallengeEvaluations.chat_context_id == chat_context_id,
+            ChallengeEvaluations.context_message_leaf_id == leaf_id
         )
     ).first()
+
     if not evaluation:
-        raise NotFoundError("Evaluation not found")
+        # Create new evaluation for this context + leaf combination
+        logger.info(f"Creating new evaluation for context {chat_context_id}, leaf {leaf_id}")
+        evaluation = ChallengeEvaluations(
+            chat_context_id=chat_context_id,
+            context_message_leaf_id=leaf_id,
+            created_at=datetime.now(UTC),
+        )
+        session.add(evaluation)
+        session.flush()  # Get the ID without committing
+
     if evaluation.processed_at is not None:
         return format_eval_result(evaluation)
 
     with Locker(session).acquire_lock(str(chat_context_id)):
         chat_context: ChatContext = _set_chat_template_context_processed(
-            session, chat_context_id
+            session, chat_context_id, leaf_id
         )
 
     session.refresh(chat_context)

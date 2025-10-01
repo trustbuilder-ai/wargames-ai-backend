@@ -315,6 +315,9 @@ class ChallengeEvaluations(SQLModel, table=True):
     processor_id: str | None = Field(
         default=None, sa_column=Column("processor_id", String)
     )
+    context_message_leaf_id: int | None = Field(
+        default=None, sa_column=Column("context_message_leaf_id", Integer)
+    )
 
     chat_context: Optional["ChatContext"] = Relationship(
         back_populates="challenge_evaluations"

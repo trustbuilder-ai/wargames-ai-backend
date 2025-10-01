@@ -126,17 +126,6 @@ def ensure_chat_context(
         message_tree=template.message_tree,  # Copy template's message tree
     )
     session.add(context)
-    session.flush()  # Flush to get the ID without committing
-
-    # Create associated evaluation record
-    assert context.id is not None, "Chat context ID should not be None"
-    evaluation = ChallengeEvaluations(
-        chat_context_id=context.id,
-        created_at=datetime.now(UTC),
-    )
-    session.add(evaluation)
-
-    # Commit both together
     session.commit()
     session.refresh(context)
 

@@ -36,6 +36,7 @@ class Message(BaseModel):
     tool_name: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
+    model: str | None = None
 
 
 class ChatContextResponse(BaseModel):
@@ -130,3 +131,9 @@ class UpdateMessageTreeResponse(BaseModel):
     class Config:
         from_attributes = True
         arbitrary_types_allowed = True
+
+
+class EvaluateRequest(BaseModel):
+    """Request body for evaluating a chat context."""
+
+    leaf_id: int = Field(..., description="ID of the message tree leaf node to evaluate to")

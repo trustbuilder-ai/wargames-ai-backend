@@ -147,7 +147,7 @@ async def list_chat_template_containers(
         List of ChatTemplateContainer objects matching the criteria
 
     Example:
-        GET /chat_template_containers?selection_filter=ACTIVE_ONLY&container_type=challenge
+        GET /chat_template_containers?selection_filter=ACTIVE_ONLY
         Response:
         [
             {
