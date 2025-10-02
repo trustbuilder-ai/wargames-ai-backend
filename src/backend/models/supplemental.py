@@ -136,4 +136,6 @@ class UpdateMessageTreeResponse(BaseModel):
 class EvaluateRequest(BaseModel):
     """Request body for evaluating a chat context."""
 
-    leaf_id: int = Field(..., description="ID of the message tree leaf node to evaluate to")
+    leaf_id: int = Field(
+        ..., description="ID of the message tree leaf node to evaluate to"
+    )

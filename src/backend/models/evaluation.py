@@ -22,3 +22,5 @@ class EvalResult(BaseModel):
     reason: str | None = None
     status: EvalStatus
     chat_template_id: int | None = None
+    chat_context_id: int | None = None
+    context_message_leaf_id: int | None = None

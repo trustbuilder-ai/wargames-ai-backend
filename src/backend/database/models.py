@@ -54,7 +54,9 @@ class ChatTemplateContainer(SQLModel, table=True):
             comment="Type of container: challenge, tutorial, assessment, etc.",
         )
     )
-    description: str | None = Field(default=None, sa_column=Column("description", Text))
+    description: str | None = Field(
+        default=None, sa_column=Column("description", Text)
+    )
     start_date: datetime | None = Field(
         default=None,
         sa_column=Column(
@@ -141,7 +143,9 @@ class ChatTemplate(SQLModel, table=True):
     chat_template_container_id: int = Field(
         sa_column=Column("chat_template_container_id", Integer)
     )
-    description: str | None = Field(default=None, sa_column=Column("description", Text))
+    description: str | None = Field(
+        default=None, sa_column=Column("description", Text)
+    )
     required_tools: str | None = Field(
         default=None, sa_column=Column("required_tools", Text)
     )
@@ -264,7 +268,16 @@ class ChallengeEvaluations(SQLModel, table=True):
             name="fk_evaluation_chat_context",
         ),
         PrimaryKeyConstraint("id", name="challenge_evaluation_pkey"),
+        UniqueConstraint(
+            "chat_context_id",
+            "context_message_leaf_id",
+            name="uq_chat_context_message_leaf",
+        ),
         UniqueConstraint("id", name="challenge_evaluation_id_key"),
+        Index(
+            "idx_challenge_evaluations_context_message_leaf_id",
+            "context_message_leaf_id",
+        ),
     )
 
     id: int | None = Field(
@@ -286,6 +299,13 @@ class ChallengeEvaluations(SQLModel, table=True):
     created_at: datetime = Field(
         sa_column=Column("created_at", DateTime(True), server_default=text("now()"))
     )
+    context_message_leaf_id: int = Field(
+        sa_column=Column(
+            "context_message_leaf_id",
+            Integer,
+            comment="ID of the leaf message in the message tree that triggered this evaluation",
+        )
+    )
     deleted_at: datetime | None = Field(
         default=None, sa_column=Column("deleted_at", DateTime(True))
     )
@@ -299,7 +319,9 @@ class ChallengeEvaluations(SQLModel, table=True):
         default=None, sa_column=Column("errored_at", DateTime(True))
     )
     result: str | None = Field(default=None, sa_column=Column("result", Text))
-    result_text: str | None = Field(default=None, sa_column=Column("result_text", Text))
+    result_text: str | None = Field(
+        default=None, sa_column=Column("result_text", Text)
+    )
     result_type: str | None = Field(
         default=None, sa_column=Column("result_type", String)
     )
@@ -314,9 +336,6 @@ class ChallengeEvaluations(SQLModel, table=True):
     )
     processor_id: str | None = Field(
         default=None, sa_column=Column("processor_id", String)
-    )
-    context_message_leaf_id: int | None = Field(
-        default=None, sa_column=Column("context_message_leaf_id", Integer)
     )
 
     chat_context: Optional["ChatContext"] = Relationship(

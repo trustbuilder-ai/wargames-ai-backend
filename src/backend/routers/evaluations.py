@@ -71,6 +71,62 @@ async def list_evaluations(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/context/{chat_context_id}", response_model=list[EvalResult])
+async def list_evaluations_by_context(
+    chat_context_id: int,
+    page_index: int = 0,
+    count: int = 10,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all evaluation results for a specific chat context.
+
+    Returns all evaluations for the given chat context, ordered by creation date
+    (most recent first). User must own the chat context.
+
+    Args:
+        chat_context_id: ID of the chat context to list evaluations for
+        page_index: Page number for pagination (0-indexed)
+        count: Number of items per page
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        List[EvalResult]: List of evaluation results for the context
+
+    Raises:
+        HTTPException: 404 if context not found, 403 if user doesn't own context
+    """
+    try:
+        # Verify user exists and get internal user ID
+        user: Users = db_api.ensure_user_exists(db, current_user["id"])
+        if user.id is None:
+            raise HTTPException(status_code=500, detail="User ID not found")
+
+        # Get and verify ownership of chat context
+        context = db.get(ChatContext, chat_context_id)
+        if not context:
+            raise HTTPException(status_code=404, detail="Chat context not found")
+
+        if context.user_id != user.id:
+            raise HTTPException(
+                status_code=403, detail="Not authorized to view this context"
+            )
+
+        # Get evaluations for the context
+        return db_api.list_evaluations_by_context_id(
+            session=db,
+            chat_context_id=chat_context_id,
+            page_index=page_index,
+            count=count,
+        )
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/chat_contexts/{chat_context_id}/evaluate", response_model=EvalResult)
 async def evaluate_chat_context(
     chat_context_id: int,

@@ -16,7 +16,7 @@ from backend.database.models import (
     ChatContext,
     ChatTemplate,
 )
-from backend.exceptions import EvaluationDecodeError, NotFoundError
+from backend.exceptions import EvaluationDecodeError
 from backend.llm.client import LLMClient
 from backend.models.evaluation import EvalResult, EvalStatus
 from backend.models.llm import ChatMessage, ChatRequest, ChatResponse
@@ -76,7 +76,7 @@ def _set_chat_template_context_processed(
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
             ChallengeEvaluations.chat_context_id == chat_context_id,
-            ChallengeEvaluations.context_message_leaf_id == leaf_id
+            ChallengeEvaluations.context_message_leaf_id == leaf_id,
         )
     ).first()
     assert evaluation, "Evaluation must exist for chat context"
@@ -238,6 +238,8 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
             )
         ),
         chat_template_id=evaluation.chat_context.chat_template_id,
+        chat_context_id=evaluation.chat_context_id,
+        context_message_leaf_id=evaluation.context_message_leaf_id,
     )
 
 
@@ -261,13 +263,15 @@ async def evaluate_chat_template_context(
     evaluation: ChallengeEvaluations | None = session.exec(
         select(ChallengeEvaluations).where(
             ChallengeEvaluations.chat_context_id == chat_context_id,
-            ChallengeEvaluations.context_message_leaf_id == leaf_id
+            ChallengeEvaluations.context_message_leaf_id == leaf_id,
         )
     ).first()
 
     if not evaluation:
         # Create new evaluation for this context + leaf combination
-        logger.info(f"Creating new evaluation for context {chat_context_id}, leaf {leaf_id}")
+        logger.info(
+            f"Creating new evaluation for context {chat_context_id}, leaf {leaf_id}"
+        )
         evaluation = ChallengeEvaluations(
             chat_context_id=chat_context_id,
             context_message_leaf_id=leaf_id,

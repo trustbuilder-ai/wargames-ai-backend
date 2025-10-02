@@ -21,7 +21,7 @@ from backend.database.models import (
     Users,
 )
 from backend.exceptions import NotFoundError
-from backend.models.evaluation import EvalResult
+from backend.models.evaluation import EvalResult, EvalStatus
 from backend.models.supplemental import (
     ChatContextResponse,
     Message,
@@ -41,14 +41,27 @@ def format_eval_result(evaluation: ChallengeEvaluations) -> EvalResult:
     Returns:
         EvalResult: Formatted evaluation result
     """
+    # Determine status from timestamp fields
+    if evaluation.succeeded_at:
+        status = EvalStatus.SUCCEEDED
+    elif evaluation.failed_at:
+        status = EvalStatus.FAILED
+    elif evaluation.errored_at:
+        status = EvalStatus.ERRORED
+    else:
+        status = EvalStatus.NOT_EVALUATED
+
+    # Get chat_template_id from the related chat_context if available
+    chat_template_id = (
+        evaluation.chat_context.chat_template_id if evaluation.chat_context else None
+    )
+
     return EvalResult(
-        id=evaluation.id,
-        succeeded_at=evaluation.succeeded_at,
-        failed_at=evaluation.failed_at,
-        errored_at=evaluation.errored_at,
-        result=evaluation.result,
-        result_text=evaluation.result_text,
-        result_type=evaluation.result_type,
+        reason=evaluation.result_text or "No result text",
+        status=status,
+        chat_template_id=chat_template_id,
+        chat_context_id=evaluation.chat_context_id,
+        context_message_leaf_id=evaluation.context_message_leaf_id,
     )
 
 
@@ -240,6 +253,42 @@ def list_evaluations(
         responses.append(response)
 
     return responses
+
+
+def list_evaluations_by_context_id(
+    session: Session,
+    chat_context_id: int,
+    page_index: int = 0,
+    count: int = 10,
+) -> list[EvalResult]:
+    """List all evaluation results for a specific chat context.
+
+    Returns a list of EvalResult objects for the given chat context,
+    ordered by creation date (most recent first).
+
+    Args:
+        session: Database session
+        chat_context_id: Chat context ID to filter by
+        page_index: Page number for pagination (0-indexed)
+        count: Number of items per page
+
+    Returns:
+        List of EvalResult objects with evaluation results
+    """
+    # Build query for evaluations of this context
+    statement = (
+        select(ChallengeEvaluations)
+        .where(ChallengeEvaluations.chat_context_id == chat_context_id)
+        .order_by(ChallengeEvaluations.created_at.desc())
+        .offset(page_index * count)
+        .limit(count)
+    )
+
+    # Execute query
+    evaluations = session.exec(statement).all()
+
+    # Convert to EvalResult objects
+    return [format_eval_result(evaluation) for evaluation in evaluations]
 
 
 def list_chat_template_containers(
